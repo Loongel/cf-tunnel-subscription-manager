@@ -40,6 +40,11 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Agent Docker image build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
 - Worker `npx wrangler deploy --dry-run`
+- Remote D1 database `cf-tunnel-control-plane` created with ID `c018bec2-7abd-42b8-863d-3030727f0026`
+- Remote D1 migration applied successfully
+- Worker deployed to `https://cf-tunnel-control-plane.officesline.workers.dev`
+- Worker smoke test passed for agent register, heartbeat, restart command creation, command polling, and subscription preview
+- Smoke-test rows were removed from remote D1 after verification
 
 Additional checks:
 
@@ -47,22 +52,16 @@ Additional checks:
 - `git diff --check`
 - Secret scan found no committed Cloudflare API token, tunnel token, or subscription/admin token.
 
-## Current Blocker
+## Runtime Secrets
 
-Live Cloudflare deployment is blocked by API token permissions. Both available tokens reached the account but returned Cloudflare API authentication error `10000` for `/accounts/<account_id>/d1/database`.
+Generated runtime secrets were stored only on `hd01` at:
 
-Required token permissions:
+`/root/.cf-tunnel-control-plane.secrets`
 
-- D1 database read/write or edit.
-- Workers script edit/deploy.
-- Worker secret edit.
+The file is not in the repository and contains `ADMIN_TOKEN`, `AGENT_TOKEN`, and `SUBSCRIPTION_TOKEN`.
 
-After a suitable token is available:
+## Remaining Work
 
-```bash
-SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/deploy-worker.sh
-WORKER_BASE_URL=https://your-worker.example \
-ADMIN_TOKEN=... \
-AGENT_TOKEN=... \
-./scripts/worker-smoke.sh
-```
+- Push a production agent image to the target container registry.
+- Deploy `deploy/docker-stack.example.yml` or a derived stack with the generated `AGENT_TOKEN` and Worker URL.
+- Verify a real Swarm quick tunnel heartbeat and restart command path from an agent container.

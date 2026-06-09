@@ -13,7 +13,7 @@ SUBCONVERTER_URL = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "cf-tunnel-control-plane"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "c018bec2-7abd-42b8-863d-3030727f0026"
 migrations_dir = "migrations"
 
 # Optional subscription cache. Uncomment after creating a KV namespace.

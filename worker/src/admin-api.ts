@@ -131,17 +131,17 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 
 async function overview(env: Env): Promise<unknown> {
   const token = await getSubscriptionToken(env);
-  const agents = await first<CountRow>(
-    env.DB,
-    "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END) AS online FROM agents"
-  );
-  const tunnels = await first<CountRow>(
-    env.DB,
-    `SELECT COUNT(*) AS total,
-      SUM(CASE WHEN health_status = 'healthy' THEN 1 ELSE 0 END) AS healthy,
-      SUM(CASE WHEN health_status = 'unhealthy' THEN 1 ELSE 0 END) AS unhealthy
-     FROM tunnels`
-  );
+	  const agents = await first<CountRow>(
+	    env.DB,
+	    "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END), 0) AS online FROM agents"
+	  );
+	  const tunnels = await first<CountRow>(
+	    env.DB,
+	    `SELECT COUNT(*) AS total,
+	      COALESCE(SUM(CASE WHEN health_status = 'healthy' THEN 1 ELSE 0 END), 0) AS healthy,
+	      COALESCE(SUM(CASE WHEN health_status = 'unhealthy' THEN 1 ELSE 0 END), 0) AS unhealthy
+	     FROM tunnels`
+	  );
   const commands = await first<CountRow>(
     env.DB,
     "SELECT COUNT(*) AS pending FROM commands WHERE status IN ('pending', 'running')"

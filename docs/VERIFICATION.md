@@ -52,5 +52,11 @@ Executed on `ssh hd01`:
 - `docker build --build-arg CLOUDFLARED_VERSION=2026.6.0 -t cf-tunnel-agent:test .`
 - `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
 - `npx wrangler deploy --dry-run`
+- `npx wrangler d1 create cf-tunnel-control-plane`
+- `npm run d1:migrate:remote`
+- `npm run deploy`
+- `./scripts/worker-smoke.sh`
 
-Live Cloudflare deployment was not completed because both available API tokens returned Cloudflare API authentication error `10000` for D1 database access.
+Deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
+
+Smoke-test rows were removed from remote D1 after verification.

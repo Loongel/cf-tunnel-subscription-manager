@@ -15,7 +15,7 @@ Do not commit real Cloudflare tokens. Use Wrangler secrets and runtime environme
 
 ## Current Status
 
-Source implementation is complete for the first release and has been build-tested on `ssh hd01`. Live Cloudflare deployment still needs an API token with D1 and Workers permissions.
+Source implementation is complete for the first release, build-tested on `ssh hd01`, and deployed to Cloudflare Workers at `https://cf-tunnel-control-plane.officesline.workers.dev`.
 
 See:
 

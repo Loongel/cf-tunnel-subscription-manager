@@ -10,8 +10,8 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | --- | --- | --- |
 | Read and implement `docs/PROJECT_REQUIREMENTS.md` | Source code exists under `worker/`, `agent/`, `deploy/`, `docs/`, and `scripts/`; implementation follows the documented Worker + Agent architecture. | Source complete |
 | Worker control plane receives tunnel information | `worker/src/agent-api.ts` implements register, heartbeat, events, and command ack. `npm run check` passed. | Verified by typecheck |
-| Worker persists tunnel information | `worker/migrations/0001_initial.sql` defines D1 schema; local Wrangler migration executed `19` commands successfully. | Local migration verified |
-| Worker admin UI displays and manages state | `worker/src/ui.ts` implements dashboard, tunnels, proxy nodes, preferred endpoints, groups, subscriptions, edits, and token rotation. Worker dry-run build passed. | Build verified |
+| Worker persists tunnel information | `worker/migrations/0001_initial.sql` defines D1 schema; remote D1 migration executed `19` commands successfully. | Remote migration verified |
+| Worker admin UI displays and manages state | `worker/src/ui.ts` implements dashboard, tunnels, proxy nodes, preferred endpoints, groups, subscriptions, edits, and token rotation. Worker deployed successfully. | Deployed |
 | Worker health checks every 5 minutes | `worker/wrangler.toml` cron is `*/5 * * * *`; `worker/src/cron.ts` probes HTTP/HTTPS quick tunnels. | Build verified |
 | Worker can command agent to restart quick tunnel | `commands` D1 table, admin restart endpoint, cron queue, and agent command polling are implemented. | Build verified |
 | V2Ray, PassWall2, sing-box subscriptions | `/sub/v2ray/:token`, `/sub/passwall2/:token`, `/sub/sing-box/:token` implemented; protocol tests passed. | Unit verified |
@@ -23,9 +23,9 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Agent reports status and handles restart commands | Agent client and manager implement register, heartbeat, events, command polling, ack, and restart. | Go test/build verified |
 | Build/compile only on `ssh hd01` | Heavy build/test commands were executed on `ssh hd01`. | Constraint respected |
 | Build/test on `ssh hd01` | `./scripts/remote-build-hd01.sh` succeeded with Worker typecheck/tests, Go tests, and Docker build. | Complete |
-| Deploy/test with Cloudflare resources | Wrangler local D1 migration and deploy dry-run passed. Live D1 access failed with API error `10000` for both available tokens. | Blocked by token permissions |
-| Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete for current stage |
-| Submit to GitHub | Local git repo has no remote configured. Commit/push still pending. | Pending |
+| Deploy/test with Cloudflare resources | D1 database `c018bec2-7abd-42b8-863d-3030727f0026` was created, remote migration applied, Worker deployed, and smoke test passed. | Complete |
+| Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
+| Submit to GitHub | GitHub remote is configured and pushed. | Complete |
 
 ## Completed Verification
 
@@ -37,15 +37,16 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Agent Docker build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local`
 - Worker `npx wrangler deploy --dry-run`
+- Worker remote D1 migration
+- Worker deploy to `https://cf-tunnel-control-plane.officesline.workers.dev`
+- `./scripts/worker-smoke.sh` against deployed Worker
+- D1 cleanup of smoke-test rows
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns
 
-## Required Evidence Before Live Completion
+## Remaining Evidence Before Agent Runtime Completion
 
-- Cloudflare token with D1 and Workers permissions succeeds with `npx wrangler d1 list` or `npx wrangler d1 create cf-tunnel-control-plane`.
-- `worker/wrangler.toml` contains the real D1 `database_id`.
-- `./scripts/deploy-worker.sh` succeeds on `ssh hd01`.
-- `./scripts/worker-smoke.sh` succeeds against the deployed Worker.
-- Optional: run an agent container against the deployed Worker and verify heartbeat, tunnel URL upload, restart command claim, and command ack in the admin UI.
-- Git remote is configured and push succeeds.
+- Push the agent Docker image to the target registry.
+- Deploy the Swarm stack with real `TUNNEL_TOKEN`, `QUICK_TUNNELS`, `WORKER_BASE_URL`, and `AGENT_TOKEN`.
+- Run a real agent container against the deployed Worker and verify heartbeat, tunnel URL upload, restart command claim, and command ack in the admin UI.
