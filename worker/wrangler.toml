@@ -1,0 +1,26 @@
+name = "cf-tunnel-control-plane"
+main = "src/index.ts"
+compatibility_date = "2026-06-09"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[vars]
+PUBLIC_BASE_URL = ""
+SUBCONVERTER_URL = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf-tunnel-control-plane"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# Optional subscription cache. Uncomment after creating a KV namespace.
+# [[kv_namespaces]]
+# binding = "SUB_CACHE"
+# id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# preview_id = "REPLACE_WITH_KV_PREVIEW_NAMESPACE_ID"
+
+[triggers]
+crons = ["*/5 * * * *"]

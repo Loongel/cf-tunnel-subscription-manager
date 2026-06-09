@@ -1,0 +1,16 @@
+node_modules/
+.agent-state/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.template
+coverage/
+*.log
+*.test
+tmp/
+bin/
+agent/tunnel-agent
+worker/.wrangler/
+worker/dist/

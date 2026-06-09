@@ -1,0 +1,20 @@
+{
+  "name": "cf-tunnel-worker-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply cf-tunnel-control-plane --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply cf-tunnel-control-plane --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260609.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.99.0"
+  }
+}
