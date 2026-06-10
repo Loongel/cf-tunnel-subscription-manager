@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseEndpointValues, parseProxySubscriptionContent } from "../src/importers";
 import { encodeBase64, mutateShareUri } from "../src/protocols";
 import { subscriptionUrls } from "../src/settings";
 import type { PreferredEndpointRow, ProxyNodeRow } from "../src/types";
@@ -91,5 +92,35 @@ describe("protocol adapter", () => {
     expect(urls.v2ray).toBe("https://worker.example.com/sub/v2ray/sub_token%2Fwith%2Bchars");
     expect(urls.passwall2).toContain("/sub/passwall2/");
     expect(urls.singBox).toContain("/sub/sing-box/");
+  });
+
+  it("splits endpoint batch input by whitespace and punctuation", () => {
+    expect(parseEndpointValues("162.159.1.1, 104.16.1.1\ncdn.example.com 162.159.1.1")).toEqual([
+      "162.159.1.1",
+      "104.16.1.1",
+      "cdn.example.com"
+    ]);
+  });
+
+  it("imports base64 encoded share-link subscriptions", () => {
+    const body = encodeBase64([
+      "vless://uuid@example.com:443?type=ws&security=tls#alpha",
+      "trojan://pass@example.net:443#beta"
+    ].join("\n"));
+    const parsed = parseProxySubscriptionContent(body, "remote");
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({ name: "alpha", sourceType: "v2ray_uri", protocol: "vless" });
+    expect(parsed[1]).toMatchObject({ name: "beta", sourceType: "v2ray_uri", protocol: "trojan" });
+  });
+
+  it("imports sing-box proxy outbounds and skips selector outbounds", () => {
+    const parsed = parseProxySubscriptionContent(JSON.stringify({
+      outbounds: [
+        { type: "selector", tag: "auto", outbounds: ["a"] },
+        { type: "vless", tag: "edge-a", server: "example.com", server_port: 443, uuid: "uuid" }
+      ]
+    }));
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ name: "edge-a", sourceType: "sing_box_outbound", protocol: "sing-box" });
   });
 });

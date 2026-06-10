@@ -16,7 +16,7 @@ The admin token is stored on `hd01` only and is not committed to Git:
 ssh hd01 "awk -F= '/^ADMIN_TOKEN=/{print \$2}' /root/.cf-tunnel-control-plane.secrets"
 ```
 
-If the dashboard shows all zeros, it means no Agent is currently reporting. The Worker does not discover tunnels by itself; the Agent must be running and sending heartbeats.
+The dashboard metric cards are public. Before login they should still show aggregate counts from `/api/public/overview`. Login is required for event details, tunnel actions, proxy node management, endpoint management, and subscription URLs.
 
 ## Current Demo Stack
 
@@ -47,15 +47,29 @@ proxy node: demo-vless-ui
 subscription preview: generatedCount = 1, protocol vless = 1
 ```
 
+## Manual UI Checks
+
+1. Open `/admin` with no token. The four dashboard metric cards should load real counts instead of resetting to zero.
+2. Enter a wrong token and click `Login`. The notice bar should show a visible login failure.
+3. Enter the admin token and click `Login`. Events, tunnels, nodes, endpoints, groups, and subscription links should load.
+4. In `Proxy Nodes`, add or edit a node only in `Node Sources`; tunnel and endpoint choices should not appear in that form.
+5. In `Proxy Nodes`, use `Traffic Binding` to select one or more nodes, choose `Direct` or `Cloudflare Tunnel`, then apply preferred endpoints.
+6. In `Preferred Endpoints`, paste IPs/domains separated by commas, spaces, or newlines into `Values`; one click should create multiple endpoint rows.
+7. In `Proxy Nodes`, use `Import From Subscription` with either subscription URLs or pasted subscription content. Supported imports are share links, base64 V2Ray-style subscriptions, and sing-box outbound JSON.
+8. In `Subscriptions`, preview V2Ray, PassWall2, and sing-box output after adding nodes and endpoints.
+
 ## Browser Flow Verified
 
 The UI was tested with Playwright on `hd01`:
 
 - Wrong admin token shows a visible login failure.
 - Correct admin token logs in and loads dashboard metrics.
-- Dashboard showed `1` online agent and `1` healthy tunnel with the demo stack running.
+- Dashboard showed public metric counts before login, then admin details after login.
 - Preferred endpoint creation works.
+- Batch preferred endpoint creation works from comma/newline-separated values.
 - Proxy node creation works.
+- Subscription content import creates proxy nodes.
+- Traffic binding updates tunnel and preferred endpoint selections separately from node source editing.
 - Subscription preview generated one VLESS node.
 - Subscription links render in the Subscriptions tab.
 
@@ -84,4 +98,3 @@ DELETE FROM preferred_endpoints WHERE label LIKE '\''demo-%'\'';
 "
 '
 ```
-

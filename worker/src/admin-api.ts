@@ -1,6 +1,7 @@
 import { requireAdmin } from "./auth";
 import { all, first, run } from "./db";
 import { queueRestartCommand } from "./cron";
+import { parseEndpointValues, parseProxySubscriptionContent, type ParsedProxyNode } from "./importers";
 import { inferProtocol } from "./protocols";
 import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from "./settings";
 import { parseSubscriptionOptions, previewSubscription } from "./subscriptions";
@@ -27,12 +28,20 @@ interface CountRow {
   pending?: number;
 }
 
+export async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Response> {
+  const path = url.pathname;
+  if (request.method === "GET" && path === "/api/public/overview") {
+    return json(await overview(env, false));
+  }
+  throw new HttpError(404, "public route not found");
+}
+
 export async function handleAdminApi(request: Request, env: Env, url: URL): Promise<Response> {
   requireAdmin(request, env);
   const path = url.pathname;
 
   if (request.method === "GET" && path === "/api/admin/overview") {
-    return json(await overview(env));
+    return json(await overview(env, true));
   }
   if (request.method === "GET" && path === "/api/admin/agents") {
     return json({ agents: await all(env.DB, "SELECT * FROM agents ORDER BY last_seen_at DESC") });
@@ -69,6 +78,10 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
     if (request.method === "POST") return json({ proxyNode: await createProxyNode(env, await readJson(request)) }, { status: 201 });
   }
 
+  if (request.method === "POST" && path === "/api/admin/proxy-nodes/import-subscription") {
+    return json(await importProxyNodes(env, await readJson(request)), { status: 201 });
+  }
+
   const proxyNodeMatch = /^\/api\/admin\/proxy-nodes\/([^/]+)$/.exec(path);
   if (proxyNodeMatch) {
     const id = proxyNodeMatch[1];
@@ -82,7 +95,8 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
   if (path === "/api/admin/preferred-endpoints") {
     if (request.method === "GET") return json({ preferredEndpoints: await listPreferredEndpoints(env) });
     if (request.method === "POST") {
-      return json({ preferredEndpoint: await createPreferredEndpoint(env, await readJson(request)) }, { status: 201 });
+      const preferredEndpoints = await createPreferredEndpoints(env, await readJson(request));
+      return json({ preferredEndpoint: preferredEndpoints[0] || null, preferredEndpoints }, { status: 201 });
     }
   }
 
@@ -129,8 +143,7 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
   throw new HttpError(404, "admin route not found");
 }
 
-async function overview(env: Env): Promise<unknown> {
-  const token = await getSubscriptionToken(env);
+async function overview(env: Env, includePrivate: boolean): Promise<unknown> {
   const agents = await first<CountRow>(
     env.DB,
     "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END), 0) AS online FROM agents"
@@ -146,14 +159,20 @@ async function overview(env: Env): Promise<unknown> {
     env.DB,
     "SELECT COUNT(*) AS pending FROM commands WHERE status IN ('pending', 'running')"
   );
+  const base = {
+    agents: agents || { total: 0, online: 0 },
+    tunnels: tunnels || { total: 0, healthy: 0, unhealthy: 0 },
+    commands: commands || { pending: 0 }
+  };
+  if (!includePrivate) return base;
+
+  const token = await getSubscriptionToken(env);
   const recent = await all(
     env.DB,
     "SELECT * FROM tunnel_events ORDER BY created_at DESC LIMIT 10"
   );
   return {
-    agents: agents || { total: 0, online: 0 },
-    tunnels: tunnels || { total: 0, healthy: 0, unhealthy: 0 },
-    commands: commands || { pending: 0 },
+    ...base,
     recentEvents: recent,
     subscriptionUrls: subscriptionUrls(env.PUBLIC_BASE_URL || "", token)
   };
@@ -220,6 +239,70 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
   return await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", id);
 }
 
+async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
+  imported: number;
+  skipped: number;
+  proxyNodes: Array<ProxyNodeRow | null>;
+  errors: string[];
+}> {
+  const sources = await readImportSources(body);
+  if (sources.length === 0) throw new HttpError(400, "subscription URL or content is required");
+
+  const namePrefix = optionalString(body.namePrefix ?? body.name_prefix);
+  const remark = optionalString(body.remark);
+  const imported: Array<ProxyNodeRow | null> = [];
+  const errors: string[] = [];
+  let skipped = 0;
+
+  for (const source of sources) {
+    let parsed: ParsedProxyNode[];
+    try {
+      parsed = parseProxySubscriptionContent(source.content, source.name);
+    } catch (error) {
+      errors.push(`${source.name}: ${error instanceof Error ? error.message : "parse failed"}`);
+      continue;
+    }
+    if (parsed.length === 0) {
+      skipped += 1;
+      errors.push(`${source.name}: no supported proxy nodes found`);
+      continue;
+    }
+
+    for (const item of parsed) {
+      imported.push(await createProxyNode(env, {
+        name: namePrefix ? `${namePrefix} ${item.name}` : item.name,
+        remark: remark || source.name,
+        rawConfig: item.rawConfig,
+        sourceType: item.sourceType,
+        protocol: item.protocol,
+        enabled: body.enabled === undefined ? true : body.enabled,
+        useTunnel: false,
+        selectedEndpointIds: []
+      }));
+    }
+  }
+
+  return { imported: imported.length, skipped, proxyNodes: imported, errors };
+}
+
+async function readImportSources(body: JsonRecord): Promise<Array<{ name: string; content: string }>> {
+  const sources: Array<{ name: string; content: string }> = [];
+  const content = optionalString(body.content);
+  if (content) {
+    sources.push({ name: optionalString(body.sourceName ?? body.source_name) || "pasted-subscription", content });
+  }
+
+  const urls = parseEndpointValues(body.url ?? body.urls);
+  for (const sourceUrl of urls) {
+    const res = await fetch(sourceUrl, {
+      headers: { "user-agent": "cf-tunnel-control-plane/0.1" }
+    });
+    if (!res.ok) throw new HttpError(400, `failed to fetch ${sourceUrl}: HTTP ${res.status}`);
+    sources.push({ name: sourceUrl, content: await res.text() });
+  }
+  return sources;
+}
+
 async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<ProxyNodeRow | null> {
   const current = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", id);
   if (!current) throw new HttpError(404, "proxy node not found");
@@ -282,12 +365,57 @@ async function listPreferredEndpoints(env: Env): Promise<unknown[]> {
 }
 
 async function createPreferredEndpoint(env: Env, body: JsonRecord): Promise<PreferredEndpointRow | null> {
+  return (await createPreferredEndpointForValue(env, body, requiredString(body.value, "value"))).row;
+}
+
+async function createPreferredEndpoints(env: Env, body: JsonRecord): Promise<PreferredEndpointRow[]> {
+  const values = parseEndpointValues(body.values ?? body.value);
+  if (values.length === 0) throw new HttpError(400, "value is required");
+  const output: PreferredEndpointRow[] = [];
+  for (const value of values) {
+    const result = await createPreferredEndpointForValue(env, body, value);
+    if (result.row) output.push(result.row);
+  }
+  return output;
+}
+
+async function createPreferredEndpointForValue(
+  env: Env,
+  body: JsonRecord,
+  value: string
+): Promise<{ row: PreferredEndpointRow | null }> {
   const id = optionalString(body.id) || makeId("endpoint");
   const type = requiredString(body.type, "type");
   if (type !== "ip" && type !== "domain") throw new HttpError(400, "type must be ip or domain");
   const scope = optionalString(body.scope) || "global";
   if (scope !== "global" && scope !== "node") throw new HttpError(400, "scope must be global or node");
   const timestamp = nowIso();
+  const existing = await first<PreferredEndpointRow>(
+    env.DB,
+    "SELECT * FROM preferred_endpoints WHERE type = ? AND value = ? AND scope = ?",
+    type,
+    value,
+    scope
+  );
+  if (existing) {
+    await run(
+      env.DB,
+      `UPDATE preferred_endpoints SET
+        label = ?, enabled = ?, default_selected = ?, sort_order = ?, updated_at = ?
+       WHERE id = ?`,
+      body.label === undefined ? existing.label : optionalString(body.label),
+      body.enabled === undefined ? existing.enabled : boolToInt(body.enabled, true),
+      body.defaultSelected === undefined && body.default_selected === undefined
+        ? existing.default_selected
+        : boolToInt(body.defaultSelected ?? body.default_selected),
+      intOrNull(body.sortOrder ?? body.sort_order) ?? existing.sort_order,
+      timestamp,
+      existing.id
+    );
+    await replaceEndpointScopes(env, existing.id, body);
+    return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", existing.id) };
+  }
+
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
@@ -295,7 +423,7 @@ async function createPreferredEndpoint(env: Env, body: JsonRecord): Promise<Pref
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     type,
-    requiredString(body.value, "value"),
+    value,
     optionalString(body.label),
     boolToInt(body.enabled, true),
     scope,
@@ -305,7 +433,7 @@ async function createPreferredEndpoint(env: Env, body: JsonRecord): Promise<Pref
     timestamp
   );
   await replaceEndpointScopes(env, id, body);
-  return await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id);
+  return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id) };
 }
 
 async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): Promise<PreferredEndpointRow | null> {

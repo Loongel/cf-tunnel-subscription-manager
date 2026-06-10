@@ -1,4 +1,4 @@
-import { handleAdminApi } from "./admin-api";
+import { handleAdminApi, handlePublicApi } from "./admin-api";
 import { handleAgentApi } from "./agent-api";
 import { runScheduled } from "./cron";
 import { getSubscriptionToken } from "./settings";
@@ -27,6 +27,9 @@ export default {
       }
       if (url.pathname.startsWith("/api/agent/")) {
         return await handleAgentApi(request, env, url);
+      }
+      if (url.pathname.startsWith("/api/public/")) {
+        return await handlePublicApi(request, env, url);
       }
       if (url.pathname.startsWith("/api/admin/")) {
         return await handleAdminApi(request, env, url);
