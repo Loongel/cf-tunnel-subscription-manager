@@ -800,13 +800,27 @@ async function readImportSources(body: JsonRecord): Promise<Array<{ name: string
 
   const urls = parseEndpointValues(body.url ?? body.urls);
   for (const sourceUrl of urls) {
-    const res = await fetch(sourceUrl, {
-      headers: { "user-agent": "cf-tunnel-control-plane/0.1" }
+    const res = await fetch(cacheBustedImportUrl(sourceUrl), {
+      headers: {
+        "user-agent": "cf-tunnel-control-plane/0.1",
+        "cache-control": "no-cache",
+        "pragma": "no-cache"
+      }
     });
     if (!res.ok) throw new HttpError(400, `failed to fetch ${sourceUrl}: HTTP ${res.status}`);
     sources.push({ name: sourceUrl, content: await res.text() });
   }
   return sources;
+}
+
+function cacheBustedImportUrl(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl);
+    url.searchParams.set("_cf_tunnel_refresh", String(Date.now()));
+    return url.toString();
+  } catch {
+    return sourceUrl;
+  }
 }
 
 async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<ProxyNodeRow | null> {
