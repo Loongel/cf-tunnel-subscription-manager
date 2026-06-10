@@ -244,52 +244,31 @@ async function withGroupDefaults(env: Env, options: SubscriptionOptions): Promis
 async function loadGroupFilter(
   env: Env,
   groupName: string | null | undefined
-): Promise<{ exists: boolean; derivedIds?: Set<string>; legacyNodeIds?: Set<string> } | null> {
+): Promise<{ exists: boolean; derivedIds: Set<string> } | null> {
   if (!groupName) return null;
   const group = await first<GroupRow>(
     env.DB,
     "SELECT endpoint_mode, endpoint_filter_json, enabled FROM groups WHERE name = ? AND enabled = 1",
     groupName
   );
-  if (!group) return { exists: false };
+  if (!group) return { exists: false, derivedIds: new Set() };
 
   const filter = parseJsonObject(group.endpoint_filter_json);
-  if (Array.isArray(filter.derivedNodeIds)) {
-    return {
-      exists: true,
-      derivedIds: new Set(filter.derivedNodeIds.filter((id): id is string => typeof id === "string"))
-    };
-  }
-
-  const legacyRows = await all<{ proxy_node_id: string }>(
-    env.DB,
-    `SELECT gm.proxy_node_id
-     FROM group_members gm
-     JOIN groups g ON g.id = gm.group_id
-     WHERE g.name = ? AND g.enabled = 1`,
-    groupName
-  );
   return {
     exists: true,
-    legacyNodeIds: new Set(legacyRows.map((row) => row.proxy_node_id))
+    derivedIds: new Set(Array.isArray(filter.derivedNodeIds)
+      ? filter.derivedNodeIds.filter((id): id is string => typeof id === "string")
+      : [])
   };
 }
 
 function filterGeneratedByGroup(
   generated: GeneratedNode[],
-  groupFilter: { exists: boolean; derivedIds?: Set<string>; legacyNodeIds?: Set<string> } | null
+  groupFilter: { exists: boolean; derivedIds: Set<string> } | null
 ): GeneratedNode[] {
   if (!groupFilter) return generated;
   if (groupFilter.exists === false) return [];
-  if (groupFilter.derivedIds) {
-    return generated.filter((item) => groupFilter.derivedIds?.has(item.id) || groupFilter.derivedIds?.has(legacyGeneratedId(item)));
-  }
-  if (groupFilter.legacyNodeIds) return generated.filter((item) => groupFilter.legacyNodeIds?.has(item.sourceNodeId));
-  return [];
-}
-
-function legacyGeneratedId(item: GeneratedNode): string {
-  return `${item.sourceNodeId}:${item.endpointId || "direct"}`;
+  return generated.filter((item) => groupFilter.derivedIds.has(item.id));
 }
 
 function selectEndpoints(

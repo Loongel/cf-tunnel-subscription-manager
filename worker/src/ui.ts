@@ -837,15 +837,8 @@ export function renderAdminUi(env: Env): string {
     }
     function generatedLabel(id) {
       const item = state.generatedNodes.find((node) => node.id === id);
-      if (!item) {
-        const legacy = state.generatedNodes.find((node) => legacyGeneratedId(node) === id);
-        if (!legacy) return id;
-        return legacy.sourceName + ' / ' + derivedShortLabel(legacy);
-      }
+      if (!item) return id;
       return item.sourceName + ' / ' + derivedShortLabel(item);
-    }
-    function legacyGeneratedId(item) {
-      return item.sourceNodeId + ':' + (item.endpointId || 'direct');
     }
     function derivedShortLabel(item) {
       if (item.endpointId) return endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId;

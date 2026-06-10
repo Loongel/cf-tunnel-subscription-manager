@@ -254,11 +254,6 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
      LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
      ORDER BY n.name`
   );
-  const memberships = await all<{ proxy_node_id: string; group_id: string; group_name: string }>(
-    env.DB,
-    `SELECT gm.proxy_node_id, g.id AS group_id, g.name AS group_name
-     FROM group_members gm JOIN groups g ON g.id = gm.group_id`
-  );
   const selections = await all<{ proxy_node_id: string; endpoint_id: string }>(
     env.DB,
     "SELECT proxy_node_id, endpoint_id FROM proxy_node_endpoint_selections WHERE enabled = 1"
@@ -273,7 +268,6 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
   );
   return rows.map((row) => ({
     ...row,
-    groups: memberships.filter((item) => item.proxy_node_id === row.id),
     selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id),
     selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections),
     selectedSniIds: sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => item.sni_id),
@@ -296,8 +290,8 @@ function selectedTunnelIdsForRow(
 async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow | null> {
   const id = optionalString(body.id) || makeId("node");
   const name = requiredString(body.name, "name");
-  const rawConfig = requiredString(body.rawConfig ?? body.raw_config, "rawConfig");
-  const sourceType = optionalString(body.sourceType ?? body.source_type) || "v2ray_uri";
+  const rawConfig = requiredString(body.rawConfig, "rawConfig");
+  const sourceType = optionalString(body.sourceType) || "v2ray_uri";
   const protocol = optionalString(body.protocol) || inferProtocol(rawConfig, sourceType);
   const selectedTunnelIds = selectedTunnelIdsFromBody(body);
   const selectedSniIds = selectedSniIdsFromBody(body);
@@ -314,9 +308,9 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
     rawConfig,
     protocol,
     boolToInt(body.enabled, true),
-    body.useTunnel === undefined && body.use_tunnel === undefined
+    body.useTunnel === undefined
       ? boolToInt(selectedTunnelIds.length > 0 || selectedSniIds.length > 0)
-      : boolToInt(body.useTunnel ?? body.use_tunnel),
+      : boolToInt(body.useTunnel),
     selectedTunnelIds[0] || null,
     timestamp,
     timestamp
@@ -432,7 +426,7 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
 }> {
   const sources = await readImportSources(body);
   if (sources.length === 0) throw new HttpError(400, "subscription URL or content is required");
-  const namePrefix = optionalString(body.namePrefix ?? body.name_prefix);
+  const namePrefix = optionalString(body.namePrefix);
   const existing = await all<{ name: string }>(env.DB, "SELECT name FROM proxy_nodes");
   const existingNames = new Set(existing.map((row) => row.name));
   const candidates: ImportCandidate[] = [];
@@ -475,12 +469,12 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
 }
 
 function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): ImportCandidate[] {
-  const excludeKeywords = stringArray(rules.excludeKeywords ?? rules.exclude_keywords).map((item) => item.toLowerCase());
-  const includeKeywords = stringArray(rules.includeKeywords ?? rules.include_keywords).map((item) => item.toLowerCase());
-  const removedNames = new Set(stringArray(rules.removedNames ?? rules.removed_names));
-  const carrierNames = new Set(stringArray(rules.carrierNames ?? rules.carrier_names));
-  const parentNamesByName = isRecord(rules.parentNamesByName ?? rules.parent_names_by_name)
-    ? (rules.parentNamesByName ?? rules.parent_names_by_name) as JsonRecord
+  const excludeKeywords = stringArray(rules.excludeKeywords).map((item) => item.toLowerCase());
+  const includeKeywords = stringArray(rules.includeKeywords).map((item) => item.toLowerCase());
+  const removedNames = new Set(stringArray(rules.removedNames));
+  const carrierNames = new Set(stringArray(rules.carrierNames));
+  const parentNamesByName = isRecord(rules.parentNamesByName)
+    ? rules.parentNamesByName as JsonRecord
     : {};
   const byName = new Map(candidates.map((item) => [item.name, item]));
 
@@ -506,18 +500,18 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
 
 function importRulesFromBody(body: JsonRecord): JsonRecord {
   const rules = isRecord(body.rules) ? { ...body.rules } as JsonRecord : {};
-  const excludeKeywords = parseEndpointValues(body.excludeKeywords ?? body.exclude_keywords);
-  const includeKeywords = parseEndpointValues(body.includeKeywords ?? body.include_keywords);
+  const excludeKeywords = parseEndpointValues(body.excludeKeywords);
+  const includeKeywords = parseEndpointValues(body.includeKeywords);
   if (excludeKeywords.length > 0) rules.excludeKeywords = excludeKeywords;
   if (includeKeywords.length > 0) rules.includeKeywords = includeKeywords;
-  if (Array.isArray(body.removedNames ?? body.removed_names)) {
-    rules.removedNames = stringArray(body.removedNames ?? body.removed_names);
+  if (Array.isArray(body.removedNames)) {
+    rules.removedNames = stringArray(body.removedNames);
   }
-  if (isRecord(body.parentNamesByName ?? body.parent_names_by_name)) {
-    rules.parentNamesByName = body.parentNamesByName ?? body.parent_names_by_name;
+  if (isRecord(body.parentNamesByName)) {
+    rules.parentNamesByName = body.parentNamesByName;
   }
-  if (Array.isArray(body.carrierNames ?? body.carrier_names)) {
-    rules.carrierNames = stringArray(body.carrierNames ?? body.carrier_names);
+  if (Array.isArray(body.carrierNames)) {
+    rules.carrierNames = stringArray(body.carrierNames);
   }
   return rules;
 }
@@ -535,23 +529,24 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
   return value
     .filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item)))
     .map((item, index) => {
-      const sourceType = optionalString(item.sourceType ?? item.source_type) === "sing_box_outbound" ? "sing_box_outbound" : "v2ray_uri";
+      const sourceType = optionalString(item.sourceType) === "sing_box_outbound" ? "sing_box_outbound" : "v2ray_uri";
+      const rawConfig = requiredString(item.rawConfig, "candidate.rawConfig");
       return {
         id: optionalString(item.id) || `candidate_${index}`,
         name: requiredString(item.name, "candidate.name"),
-        sourceName: optionalString(item.sourceName ?? item.source_name) || "import",
-        rawConfig: requiredString(item.rawConfig ?? item.raw_config, "candidate.rawConfig"),
+        sourceName: optionalString(item.sourceName) || "import",
+        rawConfig,
         sourceType,
-        protocol: optionalString(item.protocol) || inferProtocol(requiredString(item.rawConfig ?? item.raw_config, "candidate.rawConfig"), sourceType),
+        protocol: optionalString(item.protocol) || inferProtocol(rawConfig, sourceType),
         server: optionalString(item.server) || undefined,
         port: optionalString(item.port) || undefined,
         sni: optionalString(item.sni) || undefined,
         transport: optionalString(item.transport) || undefined,
         tls: Boolean(item.tls),
-        asTlsCarrier: Boolean(item.asTlsCarrier ?? item.as_tls_carrier),
+        asTlsCarrier: Boolean(item.asTlsCarrier),
         duplicate: Boolean(item.duplicate),
         removed: Boolean(item.removed),
-        parentIds: stringArray(item.parentIds ?? item.parent_ids)
+        parentIds: stringArray(item.parentIds)
       };
     });
 }
@@ -577,7 +572,7 @@ async function createCustomSni(env: Env, body: JsonRecord): Promise<CustomSniRow
     hostname,
     optionalString(body.remark),
     boolToInt(body.enabled, true),
-    intOrNull(body.sortOrder ?? body.sort_order) || 0,
+    intOrNull(body.sortOrder) || 0,
     timestamp,
     timestamp
   );
@@ -595,7 +590,7 @@ async function updateCustomSni(env: Env, id: string, body: JsonRecord): Promise<
     optionalString(body.hostname ?? body.value) || current.hostname,
     body.remark === null ? null : optionalString(body.remark) || current.remark,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
-    intOrNull(body.sortOrder ?? body.sort_order) ?? current.sort_order,
+    intOrNull(body.sortOrder) ?? current.sort_order,
     nowIso(),
     id
   );
@@ -614,7 +609,7 @@ async function createImportSource(env: Env, body: JsonRecord): Promise<ImportSou
   const id = optionalString(body.id) || makeId("import");
   const timestamp = nowIso();
   const name = requiredString(body.name, "name");
-  const sourceKind = optionalString(body.sourceKind ?? body.source_kind) || "url";
+  const sourceKind = optionalString(body.sourceKind) || "url";
   if (sourceKind !== "url" && sourceKind !== "content") throw new HttpError(400, "sourceKind must be url or content");
   await run(
     env.DB,
@@ -626,7 +621,7 @@ async function createImportSource(env: Env, body: JsonRecord): Promise<ImportSou
     sourceKind,
     optionalString(body.url),
     optionalString(body.content),
-    optionalString(body.namePrefix ?? body.name_prefix),
+    optionalString(body.namePrefix),
     boolToInt(body.enabled, true),
     safeJson(importRulesFromBody(body)),
     timestamp,
@@ -638,13 +633,14 @@ async function createImportSource(env: Env, body: JsonRecord): Promise<ImportSou
 async function updateImportSource(env: Env, id: string, body: JsonRecord): Promise<ImportSourceRow | null> {
   const current = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
   if (!current) throw new HttpError(404, "import source not found");
-  const sourceKind = optionalString(body.sourceKind ?? body.source_kind) || current.source_kind;
+  const sourceKind = optionalString(body.sourceKind) || current.source_kind;
   if (sourceKind !== "url" && sourceKind !== "content") throw new HttpError(400, "sourceKind must be url or content");
   const rules = body.rules === undefined
-    && body.excludeKeywords === undefined && body.exclude_keywords === undefined
-    && body.includeKeywords === undefined && body.include_keywords === undefined
-    && body.removedNames === undefined && body.removed_names === undefined
-    && body.parentNamesByName === undefined && body.parent_names_by_name === undefined
+    && body.excludeKeywords === undefined
+    && body.includeKeywords === undefined
+    && body.removedNames === undefined
+    && body.parentNamesByName === undefined
+    && body.carrierNames === undefined
     ? parseJsonObject(current.rules_json)
     : importRulesFromBody(body);
   await run(
@@ -656,9 +652,9 @@ async function updateImportSource(env: Env, id: string, body: JsonRecord): Promi
     sourceKind,
     body.url === null ? null : optionalString(body.url) || current.url,
     body.content === null ? null : optionalString(body.content) || current.content,
-    body.namePrefix === null || body.name_prefix === null
+    body.namePrefix === null
       ? null
-      : optionalString(body.namePrefix ?? body.name_prefix) || current.name_prefix,
+      : optionalString(body.namePrefix) || current.name_prefix,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     safeJson(rules),
     nowIso(),
@@ -728,7 +724,7 @@ async function readImportSources(body: JsonRecord): Promise<Array<{ name: string
   const sources: Array<{ name: string; content: string }> = [];
   const content = optionalString(body.content);
   if (content) {
-    sources.push({ name: optionalString(body.sourceName ?? body.source_name) || "pasted-subscription", content });
+    sources.push({ name: optionalString(body.sourceName) || "pasted-subscription", content });
   }
 
   const urls = parseEndpointValues(body.url ?? body.urls);
@@ -745,8 +741,8 @@ async function readImportSources(body: JsonRecord): Promise<Array<{ name: string
 async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<ProxyNodeRow | null> {
   const current = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", id);
   if (!current) throw new HttpError(404, "proxy node not found");
-  const rawConfig = optionalString(body.rawConfig ?? body.raw_config) || current.raw_config;
-  const sourceType = optionalString(body.sourceType ?? body.source_type) || current.source_type;
+  const rawConfig = optionalString(body.rawConfig) || current.raw_config;
+  const sourceType = optionalString(body.sourceType) || current.source_type;
   await run(
     env.DB,
     `UPDATE proxy_nodes SET
@@ -759,10 +755,10 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     rawConfig,
     optionalString(body.protocol) || inferProtocol(rawConfig, sourceType),
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
-    body.useTunnel === undefined && body.use_tunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel ?? body.use_tunnel),
-    body.selectedTunnelIds === undefined && body.selected_tunnel_ids === undefined
-      && body.selectedTrafficIds === undefined && body.selected_traffic_ids === undefined
-      && body.selectedTunnelId === undefined && body.selected_tunnel_id === undefined
+    body.useTunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel),
+    body.selectedTunnelIds === undefined
+      && body.selectedTrafficIds === undefined
+      && body.selectedTunnelId === undefined
       ? current.selected_tunnel_id
       : firstSelectedTunnelId(body),
     nowIso(),
@@ -773,14 +769,6 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
 }
 
 async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Promise<void> {
-  if (Array.isArray(body.groupIds)) {
-    await run(env.DB, "DELETE FROM group_members WHERE proxy_node_id = ?", nodeId);
-    for (const groupId of body.groupIds) {
-      if (typeof groupId === "string") {
-        await run(env.DB, "INSERT OR IGNORE INTO group_members (group_id, proxy_node_id) VALUES (?, ?)", groupId, nodeId);
-      }
-    }
-  }
   if (Array.isArray(body.selectedEndpointIds)) {
     await run(env.DB, "DELETE FROM proxy_node_endpoint_selections WHERE proxy_node_id = ?", nodeId);
     for (const endpointId of body.selectedEndpointIds) {
@@ -794,9 +782,9 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       }
     }
   }
-  if (Array.isArray(body.selectedTunnelIds) || Array.isArray(body.selected_tunnel_ids)
-    || Array.isArray(body.selectedTrafficIds) || Array.isArray(body.selected_traffic_ids)
-    || body.selectedTunnelId !== undefined || body.selected_tunnel_id !== undefined) {
+  if (Array.isArray(body.selectedTunnelIds)
+    || Array.isArray(body.selectedTrafficIds)
+    || body.selectedTunnelId !== undefined) {
     const tunnelIds = selectedTunnelIdsFromBody(body);
     await run(env.DB, "DELETE FROM proxy_node_tunnel_selections WHERE proxy_node_id = ?", nodeId);
     for (const tunnelId of tunnelIds) {
@@ -808,8 +796,8 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       );
     }
   }
-  if (Array.isArray(body.selectedSniIds) || Array.isArray(body.selected_sni_ids)
-    || Array.isArray(body.selectedTrafficIds) || Array.isArray(body.selected_traffic_ids)) {
+  if (Array.isArray(body.selectedSniIds)
+    || Array.isArray(body.selectedTrafficIds)) {
     const sniIds = selectedSniIdsFromBody(body);
     await run(env.DB, "DELETE FROM proxy_node_sni_selections WHERE proxy_node_id = ?", nodeId);
     for (const sniId of sniIds) {
@@ -824,28 +812,28 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
 }
 
 function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
-  const raw = body.selectedTunnelIds ?? body.selected_tunnel_ids;
+  const raw = body.selectedTunnelIds;
   const ids = Array.isArray(raw)
     ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
     : [];
-  const traffic = body.selectedTrafficIds ?? body.selected_traffic_ids;
+  const traffic = body.selectedTrafficIds;
   if (Array.isArray(traffic)) {
     ids.push(...traffic
       .filter((id): id is string => typeof id === "string" && id.startsWith("tunnel:"))
       .map((id) => id.slice("tunnel:".length).trim())
       .filter(Boolean));
   }
-  const single = optionalString(body.selectedTunnelId ?? body.selected_tunnel_id);
+  const single = optionalString(body.selectedTunnelId);
   if (single) ids.unshift(single);
   return Array.from(new Set(ids));
 }
 
 function selectedSniIdsFromBody(body: JsonRecord): string[] {
-  const raw = body.selectedSniIds ?? body.selected_sni_ids;
+  const raw = body.selectedSniIds;
   const ids = Array.isArray(raw)
     ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
     : [];
-  const traffic = body.selectedTrafficIds ?? body.selected_traffic_ids;
+  const traffic = body.selectedTrafficIds;
   if (Array.isArray(traffic)) {
     ids.push(...traffic
       .filter((id): id is string => typeof id === "string" && id.startsWith("sni:"))
@@ -909,10 +897,10 @@ async function createPreferredEndpointForValue(
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
       body.enabled === undefined ? existing.enabled : boolToInt(body.enabled, true),
-      body.defaultSelected === undefined && body.default_selected === undefined
+      body.defaultSelected === undefined
         ? existing.default_selected
-        : boolToInt(body.defaultSelected ?? body.default_selected),
-      intOrNull(body.sortOrder ?? body.sort_order) ?? existing.sort_order,
+        : boolToInt(body.defaultSelected),
+      intOrNull(body.sortOrder) ?? existing.sort_order,
       timestamp,
       existing.id
     );
@@ -931,8 +919,8 @@ async function createPreferredEndpointForValue(
     optionalString(body.label),
     boolToInt(body.enabled, true),
     scope,
-    boolToInt(body.defaultSelected ?? body.default_selected),
-    intOrNull(body.sortOrder ?? body.sort_order) || 0,
+    boolToInt(body.defaultSelected),
+    intOrNull(body.sortOrder) || 0,
     timestamp,
     timestamp
   );
@@ -955,10 +943,10 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
     body.label === null ? null : optionalString(body.label) || current.label,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     scope,
-    body.defaultSelected === undefined && body.default_selected === undefined
+    body.defaultSelected === undefined
       ? current.default_selected
-      : boolToInt(body.defaultSelected ?? body.default_selected),
-    intOrNull(body.sortOrder ?? body.sort_order) ?? current.sort_order,
+      : boolToInt(body.defaultSelected),
+    intOrNull(body.sortOrder) ?? current.sort_order,
     nowIso(),
     id
   );
@@ -983,11 +971,9 @@ async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRec
 
 async function listGroups(env: Env): Promise<unknown[]> {
   const groups = await all<Record<string, unknown>>(env.DB, "SELECT * FROM groups ORDER BY sort_order, name");
-  const members = await all<{ group_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM group_members");
   return groups.map((group) => ({
     ...group,
-    derivedNodeIds: derivedNodeIdsFromFilter(String(group.endpoint_filter_json || "{}")),
-    proxyNodeIds: members.filter((member) => member.group_id === group.id).map((member) => member.proxy_node_id)
+    derivedNodeIds: derivedNodeIdsFromFilter(String(group.endpoint_filter_json || "{}"))
   }));
 }
 
@@ -1002,14 +988,13 @@ async function createGroup(env: Env, body: JsonRecord): Promise<unknown> {
     id,
     requiredString(body.name, "name"),
     optionalString(body.remark),
-    optionalString(body.endpointMode ?? body.endpoint_mode) || "selected",
+    optionalString(body.endpointMode) || "selected",
     groupEndpointFilterJson(body),
     boolToInt(body.enabled, true),
-    intOrNull(body.sortOrder ?? body.sort_order) || 0,
+    intOrNull(body.sortOrder) || 0,
     timestamp,
     timestamp
   );
-  await replaceGroupMembers(env, id, body);
   return await first(env.DB, "SELECT * FROM groups WHERE id = ?", id);
 }
 
@@ -1022,26 +1007,25 @@ async function updateGroup(env: Env, id: string, body: JsonRecord): Promise<unkn
       enabled = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
     optionalString(body.name) || String(current.name),
     body.remark === null ? null : optionalString(body.remark) || (current.remark as string | null),
-    optionalString(body.endpointMode ?? body.endpoint_mode) || String(current.endpoint_mode),
-    body.endpointFilter === undefined && body.endpoint_filter === undefined
-      && body.derivedNodeIds === undefined && body.derived_node_ids === undefined
+    optionalString(body.endpointMode) || String(current.endpoint_mode),
+    body.endpointFilter === undefined
+      && body.derivedNodeIds === undefined
       ? String(current.endpoint_filter_json)
       : groupEndpointFilterJson(body),
     body.enabled === undefined ? Number(current.enabled) : boolToInt(body.enabled),
-    intOrNull(body.sortOrder ?? body.sort_order) ?? Number(current.sort_order),
+    intOrNull(body.sortOrder) ?? Number(current.sort_order),
     nowIso(),
     id
   );
-  await replaceGroupMembers(env, id, body);
   return await first(env.DB, "SELECT * FROM groups WHERE id = ?", id);
 }
 
 function groupEndpointFilterJson(body: JsonRecord): string {
-  const filter = body.endpointFilter || body.endpoint_filter || {};
+  const filter = body.endpointFilter || {};
   const record = typeof filter === "object" && filter !== null && !Array.isArray(filter)
     ? { ...(filter as Record<string, unknown>) }
     : {};
-  const ids = body.derivedNodeIds ?? body.derived_node_ids;
+  const ids = body.derivedNodeIds;
   if (Array.isArray(ids)) {
     record.derivedNodeIds = ids.filter((id): id is string => typeof id === "string");
   }
@@ -1056,15 +1040,5 @@ function derivedNodeIdsFromFilter(value: string): string[] {
     return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
   } catch {
     return [];
-  }
-}
-
-async function replaceGroupMembers(env: Env, groupId: string, body: JsonRecord): Promise<void> {
-  if (!Array.isArray(body.proxyNodeIds)) return;
-  await run(env.DB, "DELETE FROM group_members WHERE group_id = ?", groupId);
-  for (const nodeId of body.proxyNodeIds) {
-    if (typeof nodeId === "string") {
-      await run(env.DB, "INSERT OR IGNORE INTO group_members (group_id, proxy_node_id) VALUES (?, ?)", groupId, nodeId);
-    }
   }
 }
