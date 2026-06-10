@@ -1,4 +1,4 @@
-import { handleAdminApi, handlePublicApi } from "./admin-api";
+import { handleAdminApi, handlePublicApi, refreshEnabledImportSources } from "./admin-api";
 import { handleAgentApi } from "./agent-api";
 import { runScheduled } from "./cron";
 import { getSubscriptionToken } from "./settings";
@@ -47,7 +47,10 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runScheduled(env));
+    ctx.waitUntil(Promise.all([
+      runScheduled(env),
+      refreshEnabledImportSources(env)
+    ]).then(() => undefined));
   }
 };
 

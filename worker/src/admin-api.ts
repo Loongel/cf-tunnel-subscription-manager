@@ -114,7 +114,7 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 
   const importSourceRefreshMatch = /^\/api\/admin\/import-sources\/([^/]+)\/refresh$/.exec(path);
   if (request.method === "POST" && importSourceRefreshMatch) {
-    return json(await refreshImportSource(env, importSourceRefreshMatch[1]));
+    return json(await refreshImportSource(env, importSourceRefreshMatch[1], "manual"));
   }
 
   const importSourcePreviewMatch = /^\/api\/admin\/import-sources\/([^/]+)\/preview$/.exec(path);
@@ -682,11 +682,31 @@ async function previewImportSource(env: Env, id: string): Promise<{ candidates: 
   return { ...built, candidates: applyImportRules(built.candidates, currentImportRules(parseJsonObject(source.rules_json))) };
 }
 
-async function refreshImportSource(env: Env, id: string): Promise<unknown> {
+export async function refreshEnabledImportSources(env: Env): Promise<void> {
+  const sources = await all<Pick<ImportSourceRow, "id">>(
+    env.DB,
+    `SELECT id FROM import_sources
+     WHERE enabled = 1
+       AND (last_fetched_at IS NULL OR unixepoch(?) - unixepoch(last_fetched_at) >= 240)
+     ORDER BY updated_at
+     LIMIT 20`,
+    nowIso()
+  );
+  for (const source of sources) {
+    try {
+      await refreshImportSource(env, source.id, "cron");
+    } catch {
+      // refreshImportSource records the error on the source row.
+    }
+  }
+}
+
+async function refreshImportSource(env: Env, id: string, mode: "manual" | "cron"): Promise<unknown> {
   const source = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
   if (!source) throw new HttpError(404, "import source not found");
   try {
     const preview = await previewImportSource(env, id);
+    ensureFreshImportPreview(preview);
     const result = await importProxyNodes(env, {
       candidates: preview.candidates as unknown as JsonValue,
       remark: source.name,
@@ -705,7 +725,21 @@ async function refreshImportSource(env: Env, id: string): Promise<unknown> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "refresh failed";
     await run(env.DB, "UPDATE import_sources SET last_error = ?, updated_at = ? WHERE id = ?", message, nowIso(), id);
+    if (mode === "cron") return { imported: 0, updated: 0, skipped: 0, errors: [message] };
     throw error;
+  }
+}
+
+function ensureFreshImportPreview(preview: { candidates: ImportCandidate[]; errors: string[] }): void {
+  if (preview.errors.length > 0) {
+    throw new HttpError(409, `subscription refresh has errors: ${preview.errors.join("; ")}`);
+  }
+  if (preview.candidates.length === 0) {
+    throw new HttpError(409, "subscription refresh returned no proxy nodes");
+  }
+  const activeCandidates = preview.candidates.filter((item) => !item.removed);
+  if (activeCandidates.length === 0) {
+    throw new HttpError(409, "subscription refresh returned no enabled proxy nodes after import rules");
   }
 }
 
