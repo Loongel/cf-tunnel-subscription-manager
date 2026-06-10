@@ -237,7 +237,7 @@ export function renderAdminUi(env: Env): string {
               <div id="bindingNodeList" class="check-list"></div>
             </div>
             <div class="subpanel stack">
-              <label>Tunnel / SNI<select id="bindingTraffic"></select></label>
+              <label>Tunnel / SNI<select id="bindingTraffic" multiple></select></label>
               <div>
                 <label>Global Endpoints</label>
                 <div id="globalEndpointChips" class="chips"></div>
@@ -445,9 +445,10 @@ export function renderAdminUi(env: Env): string {
       state.nodes = data.proxyNodes || [];
       renderBindingNodeList();
       nodesBody.innerHTML = state.nodes.map((row) => {
-        const path = row.use_tunnel ? (row.tunnel_public_hostname || row.selected_tunnel_id || 'Tunnel not selected') : 'Direct';
+        const tunnelIds = row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : []);
+        const path = row.use_tunnel ? (tunnelIds.length + ' Tunnel / SNI') : 'Direct';
         const endpointText = row.use_tunnel ? globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional' : 'Direct';
-        return '<tr><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-node="' + esc(row.id) + '">Edit Source</button><button data-bind-node="' + esc(row.id) + '">Edit Binding</button><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+        return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
     }
     async function refreshEndpoints() {
@@ -477,7 +478,7 @@ export function renderAdminUi(env: Env): string {
     function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global'); }
     function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
-      const options = '<option value="">Direct / origin server</option>' + state.tunnels.map((t) =>
+      const options = state.tunnels.map((t) =>
         '<option value="' + esc(t.id) + '">' + esc('Tunnel SNI: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id)) + '</option>'
       ).join('');
       byId('bindingTraffic').innerHTML = options;
@@ -576,8 +577,17 @@ export function renderAdminUi(env: Env): string {
     function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
     function loadBindingFromNode(row) {
       markBindingNodes([row.id]);
-      byId('bindingTraffic').value = row.use_tunnel ? (row.selected_tunnel_id || '') : '';
+      markSelected(byId('bindingTraffic'), row.use_tunnel ? (row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])) : []);
       markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
+    }
+    function loadNodeForEditing(row) {
+      editingNodeId = row.id;
+      byId('saveNodeSource').textContent = 'Save Source';
+      byId('sourceName').value = row.name || '';
+      byId('sourceRemark').value = row.remark || '';
+      byId('sourceRaw').value = row.raw_config || '';
+      byId('sourceEnabled').value = row.enabled ? 'true' : 'false';
+      loadBindingFromNode(row);
     }
     function generatedLabel(id) {
       const item = state.generatedNodes.find((node) => node.id === id);
@@ -585,15 +595,18 @@ export function renderAdminUi(env: Env): string {
       return item.sourceName + ' / ' + derivedShortLabel(item);
     }
     function derivedShortLabel(item) {
-      if (item.endpointValue) return item.endpointValue;
+      if (item.endpointId) return endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId;
+      if (item.endpointValue) return item.endpointLabel || item.endpointValue;
       if (item.tunnelHost) return 'SNI ' + item.tunnelHost;
       return 'Direct';
     }
+    function endpointLabel(id) {
+      const endpoint = state.endpoints.find((item) => item.id === id);
+      return endpoint ? (endpoint.label || endpoint.value) : null;
+    }
     function derivedChipHtml(item, selected, index) {
-      const role = item.endpointType || (item.tunnelHost ? 'sni' : 'direct');
       const title = derivedShortLabel(item);
-      const ordinal = String(index).padStart(2, '0');
-      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(title) + '"><span class="chip-main">' + esc(ordinal) + '</span><span class="chip-sub">' + esc(role) + '</span></button>';
+      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(title) + '"><span class="chip-main">' + esc(title) + '</span></button>';
     }
     function groupChipsHtml(ids) {
       if (!ids || ids.length === 0) return '<span class="muted small">-</span>';
@@ -609,6 +622,12 @@ export function renderAdminUi(env: Env): string {
       const t = e.target;
       if (!t || !t.dataset) return;
       try {
+        const selectableRow = t.closest ? t.closest('[data-select-node]') : null;
+        if (selectableRow && !(t.closest && t.closest('button'))) {
+          const row = state.nodes.find((item) => item.id === selectableRow.dataset.selectNode);
+          if (row) loadNodeForEditing(row);
+          return;
+        }
         if (t.dataset.copy) {
           await navigator.clipboard.writeText(t.dataset.copy);
           setNotice('Copied.', 'ok');
@@ -624,14 +643,7 @@ export function renderAdminUi(env: Env): string {
         }
         if (t.dataset.editNode) {
           const row = state.nodes.find((item) => item.id === t.dataset.editNode);
-          if (row) {
-            editingNodeId = row.id;
-            byId('saveNodeSource').textContent = 'Save Source';
-            byId('sourceName').value = row.name || '';
-            byId('sourceRemark').value = row.remark || '';
-            byId('sourceRaw').value = row.raw_config || '';
-            byId('sourceEnabled').value = row.enabled ? 'true' : 'false';
-          }
+          if (row) loadNodeForEditing(row);
         }
         if (t.dataset.bindNode) {
           const row = state.nodes.find((item) => item.id === t.dataset.bindNode);
@@ -744,12 +756,12 @@ export function renderAdminUi(env: Env): string {
       try {
         const ids = selectedBindingNodeIds();
         if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
-        const selectedTunnelId = byId('bindingTraffic').value || null;
+        const selectedTunnelIds = selectedValues(byId('bindingTraffic'));
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
-            useTunnel: Boolean(selectedTunnelId),
-            selectedTunnelId,
+            useTunnel: selectedTunnelIds.length > 0,
+            selectedTunnelIds,
             selectedEndpointIds: selectedValues(byId('bindingEndpoints'))
           })
         })));

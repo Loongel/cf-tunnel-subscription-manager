@@ -9,6 +9,13 @@ interface SelectionRow {
   enabled: number;
 }
 
+interface TunnelSelectionRow {
+  proxy_node_id: string;
+  tunnel_id: string;
+  public_hostname: string | null;
+  public_url: string | null;
+}
+
 interface GroupRow {
   endpoint_mode: SubscriptionOptions["endpointMode"];
   endpoint_filter_json: string;
@@ -105,13 +112,20 @@ export async function listGeneratedNodes(env: Env, options: SubscriptionOptions)
 
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, endpoints, selections, groupFilter] = await Promise.all([
+  const [nodes, endpoints, selections, tunnelSelections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
       "SELECT * FROM preferred_endpoints WHERE enabled = 1 ORDER BY sort_order, value"
     ),
     all<SelectionRow>(env.DB, "SELECT * FROM proxy_node_endpoint_selections WHERE enabled = 1"),
+    all<TunnelSelectionRow>(
+      env.DB,
+      `SELECT pts.proxy_node_id, pts.tunnel_id, t.public_hostname, t.public_url
+       FROM proxy_node_tunnel_selections pts
+       JOIN tunnels t ON t.id = pts.tunnel_id
+       WHERE pts.enabled = 1`
+    ),
     loadGroupFilter(env, effectiveOptions.group)
   ]);
 
@@ -124,26 +138,61 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     selectedByNode.set(selection.proxy_node_id, set);
   }
 
+  const tunnelsByNode = new Map<string, TunnelSelectionRow[]>();
+  for (const selection of tunnelSelections) {
+    const rows = tunnelsByNode.get(selection.proxy_node_id) || [];
+    rows.push(selection);
+    tunnelsByNode.set(selection.proxy_node_id, rows);
+  }
+
   const output: GeneratedNode[] = [];
   for (const node of nodes) {
-    const tunnelHost = node.use_tunnel ? node.tunnel_public_hostname : null;
     const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
 
-    if (!node.use_tunnel || !tunnelHost) {
-      output.push(generateOne(node, null, null, effectiveOptions));
+    if (!node.use_tunnel) {
+      output.push(generateOne(node, null, null, null, effectiveOptions));
       continue;
     }
 
-    if (selected.length === 0) {
-      output.push(generateOne(node, tunnelHost, null, effectiveOptions));
+    const selectedTunnels = selectedTunnelsForNode(node, tunnelsByNode);
+    if (selectedTunnels.length === 0) {
+      output.push(generateOne(node, null, null, null, effectiveOptions));
       continue;
     }
 
-    for (const endpoint of selected) {
-      output.push(generateOne(node, tunnelHost, endpoint, effectiveOptions));
+    for (const tunnel of selectedTunnels) {
+      const tunnelHost = tunnel.public_hostname;
+      if (!tunnelHost) {
+        output.push(generateOne(node, tunnel.tunnel_id, null, null, effectiveOptions));
+        continue;
+      }
+      if (selected.length === 0) {
+        output.push(generateOne(node, tunnel.tunnel_id, tunnelHost, null, effectiveOptions));
+        continue;
+      }
+      for (const endpoint of selected) {
+        output.push(generateOne(node, tunnel.tunnel_id, tunnelHost, endpoint, effectiveOptions));
+      }
     }
   }
   return filterGeneratedByGroup(output, groupFilter);
+}
+
+function selectedTunnelsForNode(
+  node: ProxyNodeRow,
+  tunnelsByNode: Map<string, TunnelSelectionRow[]>
+): TunnelSelectionRow[] {
+  const selected = tunnelsByNode.get(node.id);
+  if (selected && selected.length > 0) return selected;
+  if (node.selected_tunnel_id) {
+    return [{
+      proxy_node_id: node.id,
+      tunnel_id: node.selected_tunnel_id,
+      public_hostname: node.tunnel_public_hostname || null,
+      public_url: node.tunnel_public_url || null
+    }];
+  }
+  return [];
 }
 
 async function withGroupDefaults(env: Env, options: SubscriptionOptions): Promise<SubscriptionOptions> {
@@ -197,9 +246,15 @@ function filterGeneratedByGroup(
 ): GeneratedNode[] {
   if (!groupFilter) return generated;
   if (groupFilter.exists === false) return [];
-  if (groupFilter.derivedIds) return generated.filter((item) => groupFilter.derivedIds?.has(item.id));
+  if (groupFilter.derivedIds) {
+    return generated.filter((item) => groupFilter.derivedIds?.has(item.id) || groupFilter.derivedIds?.has(legacyGeneratedId(item)));
+  }
   if (groupFilter.legacyNodeIds) return generated.filter((item) => groupFilter.legacyNodeIds?.has(item.sourceNodeId));
   return [];
+}
+
+function legacyGeneratedId(item: GeneratedNode): string {
+  return `${item.sourceNodeId}:${item.endpointId || "direct"}`;
 }
 
 function selectEndpoints(
@@ -222,13 +277,20 @@ function selectEndpoints(
 
 function generateOne(
   node: ProxyNodeRow,
+  tunnelId: string | null,
   tunnelHost: string | null,
   endpoint: PreferredEndpointRow | null,
   options: SubscriptionOptions
 ): GeneratedNode {
   const ctx = { node, tunnelHost, endpoint, format: options.format };
+  const id = `${node.id}:${tunnelId || "direct"}:${endpoint?.id || "direct"}`;
+  const metadata = {
+    id,
+    tunnelId: tunnelId || undefined,
+    endpointLabel: endpoint?.label || undefined
+  };
   if (options.format === "sing-box") {
-    return toSingBoxOutbound(node.raw_config, ctx);
+    return { ...toSingBoxOutbound(node.raw_config, ctx), ...metadata };
   }
-  return mutateShareUri(node.raw_config, ctx);
+  return { ...mutateShareUri(node.raw_config, ctx), ...metadata };
 }

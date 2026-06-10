@@ -213,11 +213,25 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
     env.DB,
     "SELECT proxy_node_id, endpoint_id FROM proxy_node_endpoint_selections WHERE enabled = 1"
   );
+  const tunnelSelections = await all<{ proxy_node_id: string; tunnel_id: string }>(
+    env.DB,
+    "SELECT proxy_node_id, tunnel_id FROM proxy_node_tunnel_selections WHERE enabled = 1"
+  );
   return rows.map((row) => ({
     ...row,
     groups: memberships.filter((item) => item.proxy_node_id === row.id),
-    selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id)
+    selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id),
+    selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections)
   }));
+}
+
+function selectedTunnelIdsForRow(
+  row: ProxyNodeRow,
+  selections: Array<{ proxy_node_id: string; tunnel_id: string }>
+): string[] {
+  const ids = selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.tunnel_id);
+  if (ids.length > 0) return ids;
+  return row.selected_tunnel_id ? [row.selected_tunnel_id] : [];
 }
 
 async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow | null> {
@@ -226,6 +240,7 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
   const rawConfig = requiredString(body.rawConfig ?? body.raw_config, "rawConfig");
   const sourceType = optionalString(body.sourceType ?? body.source_type) || "v2ray_uri";
   const protocol = optionalString(body.protocol) || inferProtocol(rawConfig, sourceType);
+  const selectedTunnelIds = selectedTunnelIdsFromBody(body);
   const timestamp = nowIso();
   await run(
     env.DB,
@@ -239,8 +254,10 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
     rawConfig,
     protocol,
     boolToInt(body.enabled, true),
-    boolToInt(body.useTunnel ?? body.use_tunnel),
-    optionalString(body.selectedTunnelId ?? body.selected_tunnel_id),
+    body.useTunnel === undefined && body.use_tunnel === undefined
+      ? boolToInt(selectedTunnelIds.length > 0)
+      : boolToInt(body.useTunnel ?? body.use_tunnel),
+    selectedTunnelIds[0] || null,
     timestamp,
     timestamp
   );
@@ -330,9 +347,10 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     optionalString(body.protocol) || inferProtocol(rawConfig, sourceType),
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     body.useTunnel === undefined && body.use_tunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel ?? body.use_tunnel),
-    body.selectedTunnelId === undefined && body.selected_tunnel_id === undefined
+    body.selectedTunnelIds === undefined && body.selected_tunnel_ids === undefined
+      && body.selectedTunnelId === undefined && body.selected_tunnel_id === undefined
       ? current.selected_tunnel_id
-      : optionalString(body.selectedTunnelId ?? body.selected_tunnel_id),
+      : firstSelectedTunnelId(body),
     nowIso(),
     id
   );
@@ -362,6 +380,33 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       }
     }
   }
+  if (Array.isArray(body.selectedTunnelIds) || Array.isArray(body.selected_tunnel_ids)
+    || body.selectedTunnelId !== undefined || body.selected_tunnel_id !== undefined) {
+    const tunnelIds = selectedTunnelIdsFromBody(body);
+    await run(env.DB, "DELETE FROM proxy_node_tunnel_selections WHERE proxy_node_id = ?", nodeId);
+    for (const tunnelId of tunnelIds) {
+      await run(
+        env.DB,
+        "INSERT OR REPLACE INTO proxy_node_tunnel_selections (proxy_node_id, tunnel_id, enabled) VALUES (?, ?, 1)",
+        nodeId,
+        tunnelId
+      );
+    }
+  }
+}
+
+function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
+  const raw = body.selectedTunnelIds ?? body.selected_tunnel_ids;
+  const ids = Array.isArray(raw)
+    ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
+    : [];
+  const single = optionalString(body.selectedTunnelId ?? body.selected_tunnel_id);
+  if (single) ids.unshift(single);
+  return Array.from(new Set(ids));
+}
+
+function firstSelectedTunnelId(body: JsonRecord): string | null {
+  return selectedTunnelIdsFromBody(body)[0] || null;
 }
 
 async function listPreferredEndpoints(env: Env): Promise<unknown[]> {

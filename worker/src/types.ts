@@ -109,8 +109,10 @@ export interface GeneratedNode {
   id: string;
   sourceNodeId: string;
   sourceName: string;
+  tunnelId?: string;
   endpointId?: string;
   endpointValue?: string;
+  endpointLabel?: string;
   endpointType?: "ip" | "domain";
   tunnelHost?: string;
   protocol: string;
