@@ -163,36 +163,13 @@ export function composeFallbackRawConfig(
   childRawConfig: string,
   childSourceType: string,
   carrierRawConfig: string,
-  carrierSourceType: string,
-  options: { carrierSniOverride?: string } = {}
+  carrierSourceType: string
 ): string {
-  const carrier = applyCarrierSniOverride(
-    inspectRawConfig(carrierRawConfig, carrierSourceType),
-    options.carrierSniOverride
-  );
+  const carrier = inspectRawConfig(carrierRawConfig, carrierSourceType);
   if (!carrier.server) return childRawConfig;
   if (childSourceType === "sing_box_outbound") return composeSingBoxRawConfig(childRawConfig, carrier);
   if (/^vmess:\/\//i.test(childRawConfig)) return composeVmessRawConfig(childRawConfig, carrier);
   return composeShareRawConfig(childRawConfig, carrier);
-}
-
-function applyCarrierSniOverride(carrier: RawConfigInfo, override?: string): RawConfigInfo {
-  const clean = override?.trim();
-  if (!clean) return carrier;
-  const tlsParams: Record<string, string> = { ...(carrier.tlsParams || {}), sni: clean };
-  if ((tlsParams.security || "").toLowerCase() === "reality") {
-    tlsParams.security = "tls";
-    for (const key of ["pbk", "sid", "spx"]) delete tlsParams[key];
-  }
-  return {
-    ...carrier,
-    sni: clean,
-    host: clean,
-    tls: true,
-    tlsParams,
-    vmessTlsParams: { ...(carrier.vmessTlsParams || {}), sni: clean, host: clean },
-    singBoxTls: { ...(carrier.singBoxTls || {}), enabled: true, server_name: clean }
-  };
 }
 
 function inspectVmessRawConfig(rawConfig: string): RawConfigInfo {

@@ -323,6 +323,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   imported: number;
   updated: number;
   skipped: number;
+  deletedOld: number;
   proxyNodes: Array<ProxyNodeRow | null>;
   errors: string[];
 }> {
@@ -340,6 +341,11 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   let skipped = 0;
   let created = 0;
   let updated = 0;
+  let deletedOld = 0;
+
+  if (body.replaceExistingForRemark === true && remark) {
+    deletedOld = await deleteImportedNodesByRemark(env, remark);
+  }
 
   for (const item of activeCandidates) {
     const name = item.name.trim();
@@ -361,9 +367,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     const variants = validCarriers.length > 0
       ? validCarriers.map((carrier) => ({
         name: validCarriers.length > 1 ? `${name} @ ${carrier.name}` : name,
-        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType, {
-          carrierSniOverride: carrier.carrierSniOverride
-        })
+        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType)
       }))
       : [{ name, rawConfig: item.rawConfig }];
 
@@ -374,7 +378,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       }
       seenNames.add(variant.name);
       try {
-        const result = await upsertProxyNodeByName(env, {
+        const payload = {
           name: variant.name,
           remark: remark || item.sourceName,
           rawConfig: variant.rawConfig,
@@ -382,8 +386,12 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
           protocol: item.protocol,
           enabled: body.enabled === undefined ? true : body.enabled,
           useTunnel: false,
-          selectedEndpointIds: []
-        });
+          selectedEndpointIds: [],
+          id: await stableImportedNodeId(remark || item.sourceName, variant.name)
+        };
+        const result = body.replaceExistingForRemark === true && remark
+          ? { row: await createProxyNode(env, payload), created: true }
+          : await upsertProxyNodeByName(env, payload);
         imported.push(result.row);
         if (result.created) created += 1;
         else updated += 1;
@@ -394,7 +402,20 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     }
   }
 
-  return { imported: created, updated, skipped, proxyNodes: imported, errors };
+  return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
+}
+
+async function deleteImportedNodesByRemark(env: Env, remark: string): Promise<number> {
+  const rows = await all<{ id: string }>(env.DB, "SELECT id FROM proxy_nodes WHERE remark = ?", remark);
+  await run(env.DB, "DELETE FROM proxy_nodes WHERE remark = ?", remark);
+  return rows.length;
+}
+
+async function stableImportedNodeId(sourceName: string, nodeName: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`${sourceName}\n${nodeName}`);
+  const digest = await crypto.subtle.digest("SHA-1", bytes);
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `node_${hex.slice(0, 32)}`;
 }
 
 async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
@@ -417,7 +438,6 @@ interface ImportCandidate {
   transport?: string;
   tls: boolean;
   asTlsCarrier?: boolean;
-  carrierSniOverride?: string;
   duplicate: boolean;
   removed?: boolean;
   parentIds?: string[];
@@ -468,43 +488,7 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
     });
   }
 
-  await applyCarrierSniHints(env, candidates);
   return { candidates, errors };
-}
-
-async function applyCarrierSniHints(env: Env, candidates: ImportCandidate[]): Promise<void> {
-  const knownHosts = new Set<string>();
-  const customSnis = await all<{ hostname: string }>(
-    env.DB,
-    "SELECT hostname FROM custom_snis WHERE enabled = 1"
-  );
-  for (const row of customSnis) {
-    for (const host of splitSniHosts(row.hostname)) knownHosts.add(host);
-  }
-  for (const candidate of candidates) {
-    for (const host of splitSniHosts(candidate.sni)) knownHosts.add(host);
-  }
-
-  for (const candidate of candidates) {
-    const hint = carrierHostHintFromName(candidate.name);
-    if (!hint) continue;
-    const current = splitSniHosts(candidate.sni);
-    if (current.some((host) => host.includes(hint))) continue;
-    const matched = Array.from(knownHosts).find((host) => host === hint || host.startsWith(`${hint}.`));
-    if (matched) candidate.carrierSniOverride = matched;
-  }
-}
-
-function carrierHostHintFromName(name: string): string | null {
-  if (!name.includes("fallback入口")) return null;
-  const normalized = name.toLowerCase();
-  const match = /(?:fallback入口|fallback入口[:：-])[:：-]?([a-z0-9][a-z0-9.-]*813711)/i.exec(normalized);
-  if (!match) return null;
-  return match[1].replace(/^-+|-+$/g, "");
-}
-
-function splitSniHosts(value: string | undefined): string[] {
-  return (value || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
 function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): ImportCandidate[] {
@@ -518,7 +502,7 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
   const byName = new Map(candidates.map((item) => [item.name, item]));
 
   for (const item of candidates) {
-    const haystack = [item.name, item.protocol, item.server, item.sni, item.carrierSniOverride, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
+    const haystack = [item.name, item.protocol, item.server, item.sni, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
     const includeMatched = includeKeywords.length === 0 || includeKeywords.some((keyword) => haystack.includes(keyword));
     const excludeMatched = excludeKeywords.some((keyword) => haystack.includes(keyword));
     item.removed = removedNames.has(item.name) || !includeMatched || excludeMatched;
@@ -591,7 +575,6 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
         transport: optionalString(item.transport) || undefined,
         tls: Boolean(item.tls),
         asTlsCarrier: Boolean(item.asTlsCarrier),
-        carrierSniOverride: optionalString(item.carrierSniOverride) || undefined,
         duplicate: Boolean(item.duplicate),
         removed: Boolean(item.removed),
         parentIds: stringArray(item.parentIds)
@@ -750,7 +733,8 @@ async function refreshImportSource(env: Env, id: string, mode: "manual" | "cron"
     const result = await importProxyNodes(env, {
       candidates: preview.candidates as unknown as JsonValue,
       remark: source.name,
-      enabled: true
+      enabled: true,
+      replaceExistingForRemark: true
     });
     await run(
       env.DB,

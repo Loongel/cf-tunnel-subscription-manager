@@ -844,13 +844,12 @@ export function renderAdminUi(env: Env): string {
         return '<select data-import-parent="' + esc(item.id) + '" data-import-parent-index="' + String(index) + '">' + parentOptions + '</select>';
       }).join('');
       const canAddTls = !item.asTlsCarrier && carriers.length > selectedParents.length;
-      const tlsMeta = item.carrierSniOverride ? 'carrier sni ' + item.carrierSniOverride : item.sni ? 'sni ' + item.sni : null;
+      const tlsMeta = item.sni ? 'sni ' + item.sni : null;
       const meta = [item.protocol, item.transport, item.server ? item.server + (item.port ? ':' + item.port : '') : null, tlsMeta].filter(Boolean).join(' / ');
       return '<div class="import-row' + (hasParent ? ' child' : '') + '">' +
         '<div class="import-node' + (item.asTlsCarrier ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
           '<strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span>' +
           (item.asTlsCarrier ? '<span class="dup">TLS carrier</span>' : '') +
-          (item.carrierSniOverride ? '<span class="dup">SNI override</span>' : '') +
           (item.duplicate ? '<span class="dup">will update existing</span>' : '') +
         '</div>' +
         '<div class="tls-controls">' + tlsControls + '</div>' +
@@ -859,7 +858,7 @@ export function renderAdminUi(env: Env): string {
       '</div>';
     }
     function importRemovedRowHtml(item) {
-      const tlsMeta = item.carrierSniOverride ? 'carrier sni ' + item.carrierSniOverride : item.sni ? 'sni ' + item.sni : null;
+      const tlsMeta = item.sni ? 'sni ' + item.sni : null;
       const meta = [item.protocol, item.server ? item.server + (item.port ? ':' + item.port : '') : null, tlsMeta].filter(Boolean).join(' / ');
       return '<div class="import-row"><div class="import-node removed"><strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span></div><span></span><button data-restore-import="' + esc(item.id) + '">Restore</button></div>';
     }
