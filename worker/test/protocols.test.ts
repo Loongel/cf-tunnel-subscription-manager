@@ -207,4 +207,36 @@ describe("protocol adapter", () => {
     expect(parsed.searchParams.get("alpn")).toBe("h2,http/1.1");
     expect(parsed.searchParams.get("path")).toBe("/app");
   });
+
+  it("does not copy REALITY parameters onto WS fallback children because Xray rejects that transport/security pair", () => {
+    const carrier = "vless://carrier@example.com:443?type=tcp&security=reality&sni=edge.example.com&fp=chrome&pbk=public-key&sid=abcd&spx=%2Fspider#carrier";
+    const child = "vless://child@origin.example.net:80?type=ws&path=%2Fapp#content";
+    const composed = composeFallbackRawConfig(child, "v2ray_uri", carrier, "v2ray_uri");
+    const parsed = new URL(composed);
+    expect(parsed.searchParams.get("security")).toBe("tls");
+    expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
+    expect(parsed.searchParams.get("host")).toBe("edge.example.com");
+    expect(parsed.searchParams.get("fp")).toBe("chrome");
+    expect(parsed.searchParams.has("pbk")).toBe(false);
+    expect(parsed.searchParams.has("sid")).toBe(false);
+    expect(parsed.searchParams.has("spx")).toBe(false);
+  });
+
+  it("uses an explicit carrier SNI override instead of the carrier raw SNI", () => {
+    const carrier = "vless://carrier@10.44.100.100:443?type=tcp&security=reality&sni=hkust.edu.hk&fp=chrome&pbk=public-key&sid=abcd&spx=%2Fspider#carrier";
+    const child = "vless://child@origin.example.net:80?type=xhttp&path=%2Fapp#content";
+    const composed = composeFallbackRawConfig(child, "v2ray_uri", carrier, "v2ray_uri", {
+      carrierSniOverride: "tv.hk.813711.xyz"
+    });
+    const parsed = new URL(composed);
+    expect(parsed.hostname).toBe("10.44.100.100");
+    expect(parsed.port).toBe("443");
+    expect(parsed.searchParams.get("security")).toBe("tls");
+    expect(parsed.searchParams.get("sni")).toBe("tv.hk.813711.xyz");
+    expect(parsed.searchParams.get("host")).toBe("tv.hk.813711.xyz");
+    expect(parsed.searchParams.get("fp")).toBe("chrome");
+    expect(parsed.searchParams.has("pbk")).toBe(false);
+    expect(parsed.searchParams.has("sid")).toBe(false);
+    expect(parsed.searchParams.has("spx")).toBe(false);
+  });
 });

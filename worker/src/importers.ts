@@ -159,12 +159,40 @@ export function inspectRawConfig(rawConfig: string, sourceType = "v2ray_uri"): R
   }
 }
 
-export function composeFallbackRawConfig(childRawConfig: string, childSourceType: string, carrierRawConfig: string, carrierSourceType: string): string {
-  const carrier = inspectRawConfig(carrierRawConfig, carrierSourceType);
+export function composeFallbackRawConfig(
+  childRawConfig: string,
+  childSourceType: string,
+  carrierRawConfig: string,
+  carrierSourceType: string,
+  options: { carrierSniOverride?: string } = {}
+): string {
+  const carrier = applyCarrierSniOverride(
+    inspectRawConfig(carrierRawConfig, carrierSourceType),
+    options.carrierSniOverride
+  );
   if (!carrier.server) return childRawConfig;
   if (childSourceType === "sing_box_outbound") return composeSingBoxRawConfig(childRawConfig, carrier);
   if (/^vmess:\/\//i.test(childRawConfig)) return composeVmessRawConfig(childRawConfig, carrier);
   return composeShareRawConfig(childRawConfig, carrier);
+}
+
+function applyCarrierSniOverride(carrier: RawConfigInfo, override?: string): RawConfigInfo {
+  const clean = override?.trim();
+  if (!clean) return carrier;
+  const tlsParams: Record<string, string> = { ...(carrier.tlsParams || {}), sni: clean };
+  if ((tlsParams.security || "").toLowerCase() === "reality") {
+    tlsParams.security = "tls";
+    for (const key of ["pbk", "sid", "spx"]) delete tlsParams[key];
+  }
+  return {
+    ...carrier,
+    sni: clean,
+    host: clean,
+    tls: true,
+    tlsParams,
+    vmessTlsParams: { ...(carrier.vmessTlsParams || {}), sni: clean, host: clean },
+    singBoxTls: { ...(carrier.singBoxTls || {}), enabled: true, server_name: clean }
+  };
 }
 
 function inspectVmessRawConfig(rawConfig: string): RawConfigInfo {
@@ -220,11 +248,12 @@ function composeShareRawConfig(rawConfig: string, carrier: RawConfigInfo): strin
     url.hostname = carrier.server || url.hostname;
     if (carrier.port) url.port = carrier.port;
     if (carrier.tls) url.searchParams.set("security", "tls");
-    for (const [key, value] of Object.entries(carrier.tlsParams || {})) {
+    const transport = (url.searchParams.get("type") || "").toLowerCase();
+    const tlsParams = tlsParamsForTransport(carrier.tlsParams || {}, transport);
+    for (const [key, value] of Object.entries(tlsParams)) {
       url.searchParams.set(key, value);
     }
     if (carrier.sni || carrier.server) url.searchParams.set("sni", carrier.sni || carrier.server || "");
-    const transport = (url.searchParams.get("type") || "").toLowerCase();
     if ((transport === "ws" || transport === "http" || transport === "xhttp" || transport === "h2") && (carrier.host || carrier.sni || carrier.server)) {
       url.searchParams.set("host", carrier.host || carrier.sni || carrier.server || "");
     }
@@ -232,6 +261,17 @@ function composeShareRawConfig(rawConfig: string, carrier: RawConfigInfo): strin
   } catch {
     return rawConfig;
   }
+}
+
+function tlsParamsForTransport(params: Record<string, string>, transport: string): Record<string, string> {
+  if ((params.security || "").toLowerCase() !== "reality" || realitySupportedTransport(transport)) return params;
+  const output: Record<string, string> = { ...params, security: "tls" };
+  for (const key of ["pbk", "sid", "spx"]) delete output[key];
+  return output;
+}
+
+function realitySupportedTransport(transport: string): boolean {
+  return transport === "" || transport === "tcp" || transport === "raw" || transport === "xhttp" || transport === "grpc";
 }
 
 function composeVmessRawConfig(rawConfig: string, carrier: RawConfigInfo): string {

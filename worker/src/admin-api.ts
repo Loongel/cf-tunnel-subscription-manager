@@ -361,7 +361,9 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     const variants = validCarriers.length > 0
       ? validCarriers.map((carrier) => ({
         name: validCarriers.length > 1 ? `${name} @ ${carrier.name}` : name,
-        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType)
+        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType, {
+          carrierSniOverride: carrier.carrierSniOverride
+        })
       }))
       : [{ name, rawConfig: item.rawConfig }];
 
@@ -415,6 +417,7 @@ interface ImportCandidate {
   transport?: string;
   tls: boolean;
   asTlsCarrier?: boolean;
+  carrierSniOverride?: string;
   duplicate: boolean;
   removed?: boolean;
   parentIds?: string[];
@@ -465,7 +468,43 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
     });
   }
 
+  await applyCarrierSniHints(env, candidates);
   return { candidates, errors };
+}
+
+async function applyCarrierSniHints(env: Env, candidates: ImportCandidate[]): Promise<void> {
+  const knownHosts = new Set<string>();
+  const customSnis = await all<{ hostname: string }>(
+    env.DB,
+    "SELECT hostname FROM custom_snis WHERE enabled = 1"
+  );
+  for (const row of customSnis) {
+    for (const host of splitSniHosts(row.hostname)) knownHosts.add(host);
+  }
+  for (const candidate of candidates) {
+    for (const host of splitSniHosts(candidate.sni)) knownHosts.add(host);
+  }
+
+  for (const candidate of candidates) {
+    const hint = carrierHostHintFromName(candidate.name);
+    if (!hint) continue;
+    const current = splitSniHosts(candidate.sni);
+    if (current.some((host) => host.includes(hint))) continue;
+    const matched = Array.from(knownHosts).find((host) => host === hint || host.startsWith(`${hint}.`));
+    if (matched) candidate.carrierSniOverride = matched;
+  }
+}
+
+function carrierHostHintFromName(name: string): string | null {
+  if (!name.includes("fallback入口")) return null;
+  const normalized = name.toLowerCase();
+  const match = /(?:fallback入口|fallback入口[:：-])[:：-]?([a-z0-9][a-z0-9.-]*813711)/i.exec(normalized);
+  if (!match) return null;
+  return match[1].replace(/^-+|-+$/g, "");
+}
+
+function splitSniHosts(value: string | undefined): string[] {
+  return (value || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
 function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): ImportCandidate[] {
@@ -479,7 +518,7 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
   const byName = new Map(candidates.map((item) => [item.name, item]));
 
   for (const item of candidates) {
-    const haystack = [item.name, item.protocol, item.server, item.sni, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
+    const haystack = [item.name, item.protocol, item.server, item.sni, item.carrierSniOverride, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
     const includeMatched = includeKeywords.length === 0 || includeKeywords.some((keyword) => haystack.includes(keyword));
     const excludeMatched = excludeKeywords.some((keyword) => haystack.includes(keyword));
     item.removed = removedNames.has(item.name) || !includeMatched || excludeMatched;
@@ -552,6 +591,7 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
         transport: optionalString(item.transport) || undefined,
         tls: Boolean(item.tls),
         asTlsCarrier: Boolean(item.asTlsCarrier),
+        carrierSniOverride: optionalString(item.carrierSniOverride) || undefined,
         duplicate: Boolean(item.duplicate),
         removed: Boolean(item.removed),
         parentIds: stringArray(item.parentIds)
