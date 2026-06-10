@@ -25,6 +25,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Build/test on `ssh hd01` | `./scripts/remote-build-hd01.sh` succeeded with Worker typecheck/tests, Go tests, and Docker build. | Complete |
 | Deploy/test with Cloudflare resources | D1 database `c018bec2-7abd-42b8-863d-3030727f0026` was created, remote migration applied, Worker deployed, and smoke test passed. | Complete |
 | Docker Swarm runtime test | Temporary Swarm stack on `hd01` ran nginx target plus Agent service on overlay network; quick tunnel returned HTTP `200`; restart command produced a new URL and returned HTTP `200` with Cloudflare DNS resolution. | Complete |
+| Admin UI interaction test | Playwright on `hd01` verified wrong-token feedback, successful login, dashboard metrics, preferred endpoint creation, proxy node creation, subscription links, and V2Ray preview generation. | Browser verified |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
 
@@ -47,6 +48,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Swarm restart command and command ack test
 - Public HTTP `200` through TryCloudflare quick tunnel before and after restart
 - D1 cleanup of runtime test rows
+- Playwright browser test for admin UI login/config/preview flow
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns

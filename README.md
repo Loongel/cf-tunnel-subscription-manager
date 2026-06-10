@@ -24,3 +24,4 @@ See:
 - [Verification plan](docs/VERIFICATION.md)
 - [Current status](docs/STATUS.md)
 - [Completion audit](docs/COMPLETION_AUDIT.md)
+- [User validation guide](docs/USER_VALIDATION.md)

@@ -49,6 +49,8 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Docker Swarm stack test passed on `hd01` with a temporary overlay network, nginx target service, Agent service, `EDGE_IP_VERSION=auto`, quick tunnel URL capture, and public HTTP `200`
 - Swarm restart command test passed: Worker queued `restart_tunnel`, Agent acked it, wrote a new quick tunnel URL, and the new URL returned HTTP `200` using Cloudflare DNS resolution
 - Temporary runtime test containers, Swarm stacks, volumes, and D1 rows were removed after verification
+- Admin UI browser test passed with Playwright on `hd01`: wrong token feedback, correct login, endpoint creation, proxy node creation, and subscription preview generation
+- A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`
 
 Additional checks:
 

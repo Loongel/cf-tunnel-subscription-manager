@@ -33,9 +33,14 @@ export function renderAdminUi(env: Env): string {
     button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     button.active { border-color: var(--accent); color: var(--accent); }
     button.danger { color: var(--bad); }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
     input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; color: var(--text); min-height: 36px; }
     textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .tokenbar { display: grid; grid-template-columns: minmax(180px, 420px) auto auto; gap: 8px; align-items: center; }
+    .notice { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; background: #fff; color: var(--muted); min-height: 38px; }
+    .notice.ok { color: var(--ok); border-color: #a9e3c5; background: #f0fdf4; }
+    .notice.error { color: var(--bad); border-color: #fecdca; background: #fff1f3; }
+    .notice.warn { color: var(--warn); border-color: #fedf89; background: #fffbeb; }
     .band { background: var(--panel); border-bottom: 1px solid var(--line); }
     .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
     .grid { display: grid; gap: 12px; }
@@ -71,11 +76,12 @@ export function renderAdminUi(env: Env): string {
     <h1>CF Tunnel Control</h1>
     <div class="tokenbar">
       <input id="tokenInput" type="password" autocomplete="off" placeholder="Admin token">
-      <button id="saveToken" class="primary">Save</button>
-      <button id="clearToken">Clear</button>
+      <button id="saveToken" class="primary">Login</button>
+      <button id="clearToken">Logout</button>
     </div>
   </header>
   <main>
+    <div id="notice" class="notice warn">Admin token required.</div>
     <nav id="tabs">
       <button data-tab="dashboard" class="active">Dashboard</button>
       <button data-tab="tunnels">Tunnels</button>
@@ -174,8 +180,24 @@ export function renderAdminUi(env: Env): string {
     let editingEndpointId = null;
     let editingGroupId = null;
     const tokenInput = document.getElementById('tokenInput');
+    const notice = document.getElementById('notice');
     tokenInput.value = localStorage.getItem('adminToken') || '';
     const authHeaders = () => ({ Authorization: 'Bearer ' + (localStorage.getItem('adminToken') || ''), 'Content-Type': 'application/json' });
+    function hasToken() { return Boolean((localStorage.getItem('adminToken') || '').trim()); }
+    function setNotice(message, kind = '') {
+      notice.textContent = message;
+      notice.className = 'notice' + (kind ? ' ' + kind : '');
+    }
+    function formatError(err) {
+      const text = String(err?.message || err || 'Request failed');
+      if (text.includes('401') || text.toLowerCase().includes('token')) return 'Login failed. Check the admin token.';
+      return text.length > 220 ? text.slice(0, 220) + '...' : text;
+    }
+    function clearDataViews() {
+      metricAgents.textContent = metricHealthy.textContent = metricUnhealthy.textContent = metricCommands.textContent = '0';
+      eventsBody.innerHTML = tunnelsBody.innerHTML = nodesBody.innerHTML = endpointsBody.innerHTML = groupsBody.innerHTML = '';
+      subscriptionLinks.innerHTML = previewOutput.textContent = '';
+    }
     async function api(path, opts = {}) {
       const res = await fetch(path, { ...opts, headers: { ...authHeaders(), ...(opts.headers || {}) } });
       if (!res.ok) throw new Error((await res.text()) || res.statusText);
@@ -191,8 +213,16 @@ export function renderAdminUi(env: Env): string {
       refreshAll();
     }
     document.getElementById('tabs').addEventListener('click', e => { if (e.target.dataset.tab) activate(e.target.dataset.tab); });
-    document.getElementById('saveToken').onclick = () => { localStorage.setItem('adminToken', tokenInput.value); refreshAll(); };
-    document.getElementById('clearToken').onclick = () => { localStorage.removeItem('adminToken'); tokenInput.value = ''; };
+    document.getElementById('saveToken').onclick = async () => {
+      localStorage.setItem('adminToken', tokenInput.value.trim());
+      await refreshAll(true);
+    };
+    document.getElementById('clearToken').onclick = () => {
+      localStorage.removeItem('adminToken');
+      tokenInput.value = '';
+      clearDataViews();
+      setNotice('Logged out.', 'warn');
+    };
 
     async function refreshDashboard() {
       const data = await api('/api/admin/overview');
@@ -205,6 +235,7 @@ export function renderAdminUi(env: Env): string {
         '<tr><td>' + esc(row.created_at) + '</td><td>' + statusPill(row.severity) + '</td><td>' + esc(row.event_type) + '</td><td>' + esc(row.message) + '</td></tr>'
       ).join('');
       renderSubscriptionLinks();
+      if (data.agents.total === 0 && data.tunnels.total === 0) setNotice('Signed in. No agents are reporting yet.', 'ok');
     }
     async function refreshTunnels() {
       const data = await api('/api/admin/tunnels');
@@ -294,102 +325,160 @@ export function renderAdminUi(env: Env): string {
     }
     document.body.addEventListener('click', async e => {
       const t = e.target;
-      if (t.dataset.copy) await navigator.clipboard.writeText(t.dataset.copy);
-      if (t.dataset.restart) { await api('/api/admin/tunnels/' + t.dataset.restart + '/restart', { method: 'POST', body: '{}' }); await refreshTunnels(); }
-      if (t.dataset.editNode) {
-        const row = state.nodes.find(item => item.id === t.dataset.editNode);
-        if (row) {
-          editingNodeId = row.id;
-          createNode.textContent = 'Save Node';
-          nodeName.value = row.name || '';
-          nodeRemark.value = row.remark || '';
-          nodeRaw.value = row.raw_config || '';
-          nodeTunnel.value = row.selected_tunnel_id || '';
-          nodeUseTunnel.value = row.use_tunnel ? 'true' : 'false';
-          markSelected(nodeEndpoints, row.selectedEndpointIds || []);
+      try {
+        if (t.dataset.copy) {
+          await navigator.clipboard.writeText(t.dataset.copy);
+          setNotice('Copied.', 'ok');
         }
-      }
-      if (t.dataset.editEndpoint) {
-        const row = state.endpoints.find(item => item.id === t.dataset.editEndpoint);
-        if (row) {
-          editingEndpointId = row.id;
-          createEndpoint.textContent = 'Save Endpoint';
-          endpointType.value = row.type || 'ip';
-          endpointValue.value = row.value || '';
-          endpointLabel.value = row.label || '';
-          endpointScope.value = row.scope || 'global';
-          endpointDefault.value = row.default_selected ? 'true' : 'false';
-          markSelected(endpointNodes, row.proxyNodeIds || []);
+        if (t.dataset.restart) {
+          await api('/api/admin/tunnels/' + t.dataset.restart + '/restart', { method: 'POST', body: '{}' });
+          setNotice('Restart command queued.', 'ok');
+          await refreshTunnels();
         }
-      }
-      if (t.dataset.editGroup) {
-        const row = state.groups.find(item => item.id === t.dataset.editGroup);
-        if (row) {
-          editingGroupId = row.id;
-          createGroup.textContent = 'Save Group';
-          groupName.value = row.name || '';
-          groupEndpointMode.value = row.endpoint_mode || 'selected';
-          markSelected(groupNodes, row.proxyNodeIds || []);
+        if (t.dataset.editNode) {
+          const row = state.nodes.find(item => item.id === t.dataset.editNode);
+          if (row) {
+            editingNodeId = row.id;
+            createNode.textContent = 'Save Node';
+            nodeName.value = row.name || '';
+            nodeRemark.value = row.remark || '';
+            nodeRaw.value = row.raw_config || '';
+            nodeTunnel.value = row.selected_tunnel_id || '';
+            nodeUseTunnel.value = row.use_tunnel ? 'true' : 'false';
+            markSelected(nodeEndpoints, row.selectedEndpointIds || []);
+          }
         }
+        if (t.dataset.editEndpoint) {
+          const row = state.endpoints.find(item => item.id === t.dataset.editEndpoint);
+          if (row) {
+            editingEndpointId = row.id;
+            createEndpoint.textContent = 'Save Endpoint';
+            endpointType.value = row.type || 'ip';
+            endpointValue.value = row.value || '';
+            endpointLabel.value = row.label || '';
+            endpointScope.value = row.scope || 'global';
+            endpointDefault.value = row.default_selected ? 'true' : 'false';
+            markSelected(endpointNodes, row.proxyNodeIds || []);
+          }
+        }
+        if (t.dataset.editGroup) {
+          const row = state.groups.find(item => item.id === t.dataset.editGroup);
+          if (row) {
+            editingGroupId = row.id;
+            createGroup.textContent = 'Save Group';
+            groupName.value = row.name || '';
+            groupEndpointMode.value = row.endpoint_mode || 'selected';
+            markSelected(groupNodes, row.proxyNodeIds || []);
+          }
+        }
+        if (t.dataset.deleteNode) {
+          await api('/api/admin/proxy-nodes/' + t.dataset.deleteNode, { method: 'DELETE' });
+          setNotice('Node deleted.', 'ok');
+          await refreshNodes();
+        }
+        if (t.dataset.deleteEndpoint) {
+          await api('/api/admin/preferred-endpoints/' + t.dataset.deleteEndpoint, { method: 'DELETE' });
+          setNotice('Endpoint deleted.', 'ok');
+          await refreshEndpoints();
+        }
+        if (t.dataset.deleteGroup) {
+          await api('/api/admin/groups/' + t.dataset.deleteGroup, { method: 'DELETE' });
+          setNotice('Group deleted.', 'ok');
+          await refreshGroups();
+        }
+      } catch (err) {
+        setNotice(formatError(err), 'error');
       }
-      if (t.dataset.deleteNode) { await api('/api/admin/proxy-nodes/' + t.dataset.deleteNode, { method: 'DELETE' }); await refreshNodes(); }
-      if (t.dataset.deleteEndpoint) { await api('/api/admin/preferred-endpoints/' + t.dataset.deleteEndpoint, { method: 'DELETE' }); await refreshEndpoints(); }
-      if (t.dataset.deleteGroup) { await api('/api/admin/groups/' + t.dataset.deleteGroup, { method: 'DELETE' }); await refreshGroups(); }
     });
     createNode.onclick = async () => {
+      try {
       const path = editingNodeId ? '/api/admin/proxy-nodes/' + editingNodeId : '/api/admin/proxy-nodes';
       const method = editingNodeId ? 'PATCH' : 'POST';
+      const wasEditing = Boolean(editingNodeId);
       await api(path, { method, body: JSON.stringify({
         name: nodeName.value, remark: nodeRemark.value, rawConfig: nodeRaw.value,
         useTunnel: nodeUseTunnel.value === 'true', selectedTunnelId: nodeTunnel.value || null,
         selectedEndpointIds: selectedValues(nodeEndpoints)
       }) });
       resetNodeForm();
+      setNotice(wasEditing ? 'Node saved.' : 'Node added.', 'ok');
       await refreshNodes();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
     };
     createEndpoint.onclick = async () => {
+      try {
       const path = editingEndpointId ? '/api/admin/preferred-endpoints/' + editingEndpointId : '/api/admin/preferred-endpoints';
       const method = editingEndpointId ? 'PATCH' : 'POST';
+      const wasEditing = Boolean(editingEndpointId);
       await api(path, { method, body: JSON.stringify({
         type: endpointType.value, value: endpointValue.value, label: endpointLabel.value,
         scope: endpointScope.value, defaultSelected: endpointDefault.value === 'true',
         proxyNodeIds: selectedValues(endpointNodes)
       }) });
       resetEndpointForm();
+      setNotice(wasEditing ? 'Endpoint saved.' : 'Endpoint added.', 'ok');
       await refreshEndpoints();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
     };
     createGroup.onclick = async () => {
+      try {
       const path = editingGroupId ? '/api/admin/groups/' + editingGroupId : '/api/admin/groups';
       const method = editingGroupId ? 'PATCH' : 'POST';
+      const wasEditing = Boolean(editingGroupId);
       await api(path, { method, body: JSON.stringify({
         name: groupName.value,
         endpointMode: groupEndpointMode.value,
         proxyNodeIds: selectedValues(groupNodes)
       }) });
       resetGroupForm();
+      setNotice(wasEditing ? 'Group saved.' : 'Group added.', 'ok');
       await refreshGroups();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
     };
     rotateSubscriptionToken.onclick = async () => {
+      try {
       await api('/api/admin/subscriptions/rotate-token', { method: 'POST', body: '{}' });
+      setNotice('Subscription token rotated.', 'ok');
       await refreshDashboard();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
     };
     runPreview.onclick = async () => {
+      try {
       const params = new URLSearchParams({ format: previewFormat.value, endpointMode: previewEndpointMode.value });
       if (previewGroup.value) params.set('group', previewGroup.value);
       previewOutput.textContent = JSON.stringify(await api('/api/admin/subscriptions/preview?' + params.toString()), null, 2);
+      setNotice('Preview updated.', 'ok');
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
     };
     refreshDashboard.onclick = refreshDashboard;
     refreshTunnels.onclick = refreshTunnels;
     refreshNodes.onclick = refreshNodes;
     refreshEndpoints.onclick = refreshEndpoints;
-    async function refreshAll() {
+    async function refreshAll(fromLogin = false) {
+      if (!hasToken()) {
+        clearDataViews();
+        setNotice('Admin token required.', 'warn');
+        return;
+      }
       try {
         await Promise.all([refreshDashboard(), refreshTunnels()]);
         await refreshNodes();
         await refreshEndpoints();
         await refreshGroups();
+        if (fromLogin) setNotice('Signed in.', 'ok');
       } catch (err) {
-        previewOutput.textContent = String(err.message || err);
+        clearDataViews();
+        setNotice(formatError(err), 'error');
       }
     }
     refreshAll();
