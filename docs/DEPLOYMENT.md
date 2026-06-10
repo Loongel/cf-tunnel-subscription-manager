@@ -54,10 +54,17 @@ Build on `ssh hd01`:
 cd /path/to/CF-temp-tunnels-auto-update-to-subs/agent
 docker build \
   --build-arg CLOUDFLARED_VERSION=2026.6.0 \
-  -t ghcr.io/your-org/cf-tunnel-agent:0.1.0 .
+  -t cf-tunnel-agent:test .
 ```
 
-Push the image to your registry, then update `deploy/docker-stack.example.yml`.
+For a single-node or node-constrained Swarm deployment, preloading `cf-tunnel-agent:test` on the target node is enough. For multi-node Swarm, push the image to a registry and set `AGENT_IMAGE` in the stack environment, for example:
+
+```bash
+docker tag cf-tunnel-agent:test ghcr.io/<owner>/<repo>/cf-tunnel-agent:0.1.0
+docker push ghcr.io/<owner>/<repo>/cf-tunnel-agent:0.1.0
+```
+
+The attempted GHCR push from `hd01` failed because the available GitHub token lacked package write scope. Use a token with `write:packages` or another registry credential.
 
 ## Docker Swarm
 
@@ -68,3 +75,5 @@ docker stack deploy -c deploy/docker-stack.example.yml edge
 ```
 
 The agent health endpoint is `127.0.0.1:1984/health` inside the container.
+
+`EDGE_IP_VERSION=auto` is the recommended default for Docker Swarm overlay networks. IPv6-only mode (`6`) can fail inside overlay containers when the host has IPv6 but the container network does not.

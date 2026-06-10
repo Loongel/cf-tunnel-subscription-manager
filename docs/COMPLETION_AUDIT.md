@@ -19,11 +19,12 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Grouped subscription generation | Group CRUD and group-level endpoint mode defaults are implemented. | Build verified |
 | Agent does not download cloudflared at runtime | `agent/Dockerfile` downloads pinned `cloudflared 2026.6.0` at image build time; Docker build passed. | Docker verified |
 | Agent starts fixed and quick tunnels | `agent/internal/manager/manager.go` supervises fixed token tunnel and multiple quick tunnels. | Go test/build verified |
-| Agent records quick tunnel URLs locally | Agent writes status files and aggregate map file under `/temp-tunnel`. | Go test/build verified |
-| Agent reports status and handles restart commands | Agent client and manager implement register, heartbeat, events, command polling, ack, and restart. | Go test/build verified |
+| Agent records quick tunnel URLs locally | Agent wrote `http://target:80 https://...trycloudflare.com` to `/temp-tunnel/tunnels.list` during real container and Swarm tests. | Runtime verified |
+| Agent reports status and handles restart commands | Worker queued `restart_tunnel`; Agent claimed and acked it; Worker pending count returned to `0`; Agent wrote a new quick tunnel URL. | Runtime verified |
 | Build/compile only on `ssh hd01` | Heavy build/test commands were executed on `ssh hd01`. | Constraint respected |
 | Build/test on `ssh hd01` | `./scripts/remote-build-hd01.sh` succeeded with Worker typecheck/tests, Go tests, and Docker build. | Complete |
 | Deploy/test with Cloudflare resources | D1 database `c018bec2-7abd-42b8-863d-3030727f0026` was created, remote migration applied, Worker deployed, and smoke test passed. | Complete |
+| Docker Swarm runtime test | Temporary Swarm stack on `hd01` ran nginx target plus Agent service on overlay network; quick tunnel returned HTTP `200`; restart command produced a new URL and returned HTTP `200` with Cloudflare DNS resolution. | Complete |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
 
@@ -41,12 +42,16 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Worker deploy to `https://cf-tunnel-control-plane.officesline.workers.dev`
 - `./scripts/worker-smoke.sh` against deployed Worker
 - D1 cleanup of smoke-test rows
+- Real Agent container quick tunnel test against deployed Worker
+- Temporary Docker Swarm stack quick tunnel test against deployed Worker
+- Swarm restart command and command ack test
+- Public HTTP `200` through TryCloudflare quick tunnel before and after restart
+- D1 cleanup of runtime test rows
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns
 
-## Remaining Evidence Before Agent Runtime Completion
+## Remaining Production Operation
 
-- Push the agent Docker image to the target registry.
-- Deploy the Swarm stack with real `TUNNEL_TOKEN`, `QUICK_TUNNELS`, `WORKER_BASE_URL`, and `AGENT_TOKEN`.
-- Run a real agent container against the deployed Worker and verify heartbeat, tunnel URL upload, restart command claim, and command ack in the admin UI.
+- Push the agent Docker image to the target registry if multiple Swarm nodes need to pull it. The available GitHub token did not have GHCR `write:packages` scope.
+- Deploy the production Swarm stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.

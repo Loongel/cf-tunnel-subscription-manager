@@ -186,6 +186,7 @@ MVP 默认方案：
 | `HEARTBEAT_INTERVAL` | 否 | 心跳间隔，默认 `30s`。 |
 | `COMMAND_POLL_INTERVAL` | 否 | 命令轮询间隔，默认 `20s`。 |
 | `RESTART_COOLDOWN_SECONDS` | 否 | quick tunnel 自动重启退避，默认 `610`。 |
+| `EDGE_IP_VERSION` | 否 | 传给 `cloudflared --edge-ip-version`，支持 `auto`、`4`、`6`；Docker Swarm overlay 网络建议用 `auto`。 |
 
 ### 5.2 Agent 注册信息
 
@@ -827,11 +828,11 @@ cloudflared:
 9. 优选 IP/域名同时支持全局录入和节点级录入；每个代理节点配置时可以自行多选实际使用的 IP/域名。
 10. Agent 如果 shell 实现复杂，则改用 Go 或 Rust；默认优先 Go，以降低并发和 HTTP 交互复杂度并保持低资源占用。
 
-### 13.2 剩余开放点
+### 13.2 生产接入输入
 
-1. 需要确定镜像发布位置，例如 Docker Hub、GHCR 或私有 registry。
-2. 需要补充 5-10 个真实节点样例，用来验证 PassWall2、V2Ray 和 sing-box 输出兼容性。
-3. 需要在 `ssh hd01` 恢复后完成远端构建、测试和部署验证。
+1. 多节点 Swarm 生产部署需要确定镜像发布位置，例如 Docker Hub、GHCR 或私有 registry，并提供对应写入凭据。
+2. 真实代理节点样例和固定隧道 token 属于生产数据，应通过管理 UI、API 或运行时环境变量录入，不提交到仓库。
+3. 已在 `ssh hd01` 完成远端构建、Worker 部署、真实 Agent 容器测试和临时 Docker Swarm stack 测试。Swarm overlay 网络验证显示 `EDGE_IP_VERSION=auto` 比 IPv6-only 更稳妥。
 
 ## 14. 能力和开源项目参考
 

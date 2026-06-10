@@ -45,6 +45,10 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Worker deployed to `https://cf-tunnel-control-plane.officesline.workers.dev`
 - Worker smoke test passed for agent register, heartbeat, restart command creation, command polling, and subscription preview
 - Smoke-test rows were removed from remote D1 after verification
+- Real Agent container test passed on `hd01` with a temporary nginx target, quick tunnel URL capture, Worker heartbeat, restart command ack, new URL capture, and public HTTP `200`
+- Docker Swarm stack test passed on `hd01` with a temporary overlay network, nginx target service, Agent service, `EDGE_IP_VERSION=auto`, quick tunnel URL capture, and public HTTP `200`
+- Swarm restart command test passed: Worker queued `restart_tunnel`, Agent acked it, wrote a new quick tunnel URL, and the new URL returned HTTP `200` using Cloudflare DNS resolution
+- Temporary runtime test containers, Swarm stacks, volumes, and D1 rows were removed after verification
 
 Additional checks:
 
@@ -62,6 +66,5 @@ The file is not in the repository and contains `ADMIN_TOKEN`, `AGENT_TOKEN`, and
 
 ## Remaining Work
 
-- Push a production agent image to the target container registry.
-- Deploy `deploy/docker-stack.example.yml` or a derived stack with the generated `AGENT_TOKEN` and Worker URL.
-- Verify a real Swarm quick tunnel heartbeat and restart command path from an agent container.
+- Push a production agent image to the target container registry if the service will run on multiple Swarm nodes. The available GitHub token lacked GHCR `write:packages` scope, so the repository documents the registry step instead of committing credentials.
+- Deploy the production stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.

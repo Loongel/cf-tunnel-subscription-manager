@@ -302,7 +302,7 @@ func (f *fixedTunnel) run(ctx context.Context) {
 		}
 		f.setStatus("running", "", time.Now())
 		args := []string{
-			"tunnel", "--edge-ip-version", f.cfg.FixedEdgeIPVersion, "--no-autoupdate",
+			"tunnel", "--edge-ip-version", f.cfg.EdgeIPVersion, "--no-autoupdate",
 			"--metrics", fmt.Sprintf("127.0.0.1:%d", f.cfg.FixedMetricsPortBase),
 			"run", "--token", f.cfg.TunnelToken,
 		}
@@ -438,7 +438,7 @@ func (q *quickTunnel) run(ctx context.Context) {
 
 func (q *quickTunnel) runOnce(ctx context.Context) error {
 	args := []string{
-		"tunnel", "--edge-ip-version", q.cfg.FixedEdgeIPVersion, "--no-autoupdate",
+		"tunnel", "--edge-ip-version", q.cfg.EdgeIPVersion, "--no-autoupdate",
 		"--metrics", fmt.Sprintf("127.0.0.1:%d", q.metricsPort),
 		"--url", q.target,
 	}

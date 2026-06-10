@@ -33,7 +33,7 @@ type Config struct {
 	RestartCooldown      time.Duration
 	CloudflaredPath      string
 	HealthAddr           string
-	FixedEdgeIPVersion   string
+	EdgeIPVersion        string
 	QuickStartSpacing    time.Duration
 }
 
@@ -58,7 +58,7 @@ func FromEnv() (Config, error) {
 		RestartCooldown:      durationEnv("RESTART_COOLDOWN_SECONDS", 610*time.Second),
 		CloudflaredPath:      stringEnv("CLOUDFLARED_PATH", "/usr/local/bin/cloudflared"),
 		HealthAddr:           stringEnv("HEALTH_ADDR", "127.0.0.1:1984"),
-		FixedEdgeIPVersion:   stringEnv("EDGE_IP_VERSION", "6"),
+		EdgeIPVersion:        stringEnv("EDGE_IP_VERSION", "6"),
 		QuickStartSpacing:    durationEnv("QUICK_START_SPACING", 20*time.Second),
 	}
 	cfg.StatusDir = statusDirFromMap(cfg.MapFile)

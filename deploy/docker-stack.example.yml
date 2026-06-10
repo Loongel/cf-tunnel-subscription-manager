@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   cloudflared:
-    image: ghcr.io/your-org/cf-tunnel-agent:0.1.0
+    image: ${AGENT_IMAGE:-cf-tunnel-agent:test}
     hostname: cloudflared
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:1984/health >/dev/null || exit 1"]
@@ -27,6 +27,7 @@ services:
       QUICK_TUNNELS: ${QUICK_TUNNELS}
       FIXED_METRICS_PORT_BASE: "2000"
       QUICK_METRICS_PORT_BASE: "2100"
+      EDGE_IP_VERSION: ${EDGE_IP_VERSION:-auto}
       LOG_FILE: /temp-tunnel/history.log
       MAP_FILE: /temp-tunnel/tunnels.list
       WORKER_BASE_URL: ${WORKER_BASE_URL}

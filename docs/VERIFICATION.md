@@ -56,7 +56,9 @@ Executed on `ssh hd01`:
 - `npm run d1:migrate:remote`
 - `npm run deploy`
 - `./scripts/worker-smoke.sh`
+- Real Agent container test on `hd01`: quick tunnel URL capture, public HTTP `200`, Worker heartbeat, restart command ack, and new URL capture
+- Temporary Docker Swarm stack test on `hd01`: nginx target service, Agent service, overlay network, `EDGE_IP_VERSION=auto`, public HTTP `200`, restart command ack, and new URL public HTTP `200`
 
 Deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
 
-Smoke-test rows were removed from remote D1 after verification.
+Smoke-test and runtime-test rows were removed from remote D1 after verification.
