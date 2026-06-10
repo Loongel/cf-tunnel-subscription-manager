@@ -779,12 +779,11 @@ export function renderAdminUi(env: Env): string {
       byId('previewGroup').value = current;
     }
     function renderSubscriptionLinks() {
-      const base = BASE_URL || location.origin;
       const urls = (state.overview && state.overview.subscriptionUrls) || {};
       const rows = [
-        ['V2Ray', urls.v2ray || base + '/sub/v2ray/'],
-        ['PassWall2', urls.passwall2 || base + '/sub/passwall2/'],
-        ['sing-box', urls.singBox || base + '/sub/sing-box/']
+        ['V2Ray', absoluteSubscriptionUrl(urls.v2ray || '/sub/v2ray/')],
+        ['PassWall2', absoluteSubscriptionUrl(urls.passwall2 || '/sub/passwall2/')],
+        ['sing-box', absoluteSubscriptionUrl(urls.singBox || '/sub/sing-box/')]
       ];
       const groups = [{ name: 'All', query: '' }, ...state.groups.map((group) => ({ name: group.name, query: '?group=' + encodeURIComponent(group.name) }))];
       subscriptionLinks.innerHTML = rows.map(([formatName, url]) => {
@@ -794,6 +793,11 @@ export function renderAdminUi(env: Env): string {
         }).join('');
         return '<div class="link-chip-row"><strong>' + esc(formatName) + '</strong><div class="link-chips">' + chips + '</div></div>';
       }).join('');
+    }
+    function absoluteSubscriptionUrl(url) {
+      const base = BASE_URL || location.origin;
+      if (/^https?:\/\//i.test(url)) return url;
+      return base + (url.startsWith('/') ? url : '/' + url);
     }
     function renderImportReview() {
       const review = byId('importReview');
