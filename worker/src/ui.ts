@@ -127,16 +127,30 @@ export function renderAdminUi(env: Env): string {
     .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-items: center; }
     .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 8px; color: var(--accent-2); background: rgba(125, 211, 252, 0.08); font-size: 12px; }
     .check-list { display: grid; gap: 7px; max-height: 332px; overflow: auto; padding-right: 2px; }
-    .check-row, .derived-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; border: 1px solid var(--line); background: #0b1118; border-radius: 6px; padding: 8px; color: var(--text); }
-    .check-row:hover, .derived-row:hover { border-color: var(--accent); }
-    .check-row input, .derived-row input { width: 16px; min-height: 16px; margin-top: 2px; }
+    .check-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; border: 1px solid var(--line); background: #0b1118; border-radius: 6px; padding: 8px; color: var(--text); }
+    .check-row:hover { border-color: var(--accent); }
+    .check-row input { width: 16px; min-height: 16px; margin-top: 2px; }
     .row-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
     .row-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .derived-grid { display: grid; gap: 7px; max-height: 430px; overflow: auto; padding-right: 2px; }
-    .derived-source { color: var(--accent); font-size: 12px; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .derived-grid { display: grid; gap: 9px; max-height: 430px; overflow: auto; padding-right: 2px; }
+    .chip-row { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 10px; align-items: center; border: 1px solid var(--line); background: #0b1118; border-radius: 6px; padding: 9px; }
+    .chip-row-title { min-width: 0; }
+    .chip-row-title strong { display: block; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip-row-title span { color: var(--muted); font-size: 12px; }
+    .chip-options { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+    .select-chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 11px; min-height: 31px; color: var(--muted); background: #17202b; font-size: 12px; line-height: 1; }
+    .select-chip:hover { color: var(--text); border-color: var(--accent); }
+    .select-chip.selected { color: #effcff; border-color: #38bdf8; background: linear-gradient(135deg, #1d4ed8, #0891b2); box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2) inset; }
+    .select-chip .chip-main { font-weight: 700; }
+    .select-chip .chip-sub { margin-left: 6px; color: rgba(231, 237, 243, 0.72); }
+    .select-chip span { pointer-events: none; }
+    .group-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .group-chip { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 8px; color: var(--accent-2); background: rgba(125, 211, 252, 0.08); font-size: 12px; max-width: 280px; }
+    .group-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
       .tokenbar, .metrics, .formgrid, .split, .binding-grid { grid-template-columns: 1fr; }
+      .chip-row { grid-template-columns: 1fr; }
       .formgrid .wide { grid-column: span 1; }
       th { position: static; }
     }
@@ -455,8 +469,7 @@ export function renderAdminUi(env: Env): string {
       renderGroupOptions();
       groupsBody.innerHTML = state.groups.map((row) => {
         const ids = row.derivedNodeIds || [];
-        const sample = ids.slice(0, 3).map((id) => generatedLabel(id)).join(', ');
-        return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td class="small muted">' + esc(sample || '-') + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+        return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td>' + groupChipsHtml(ids) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
     }
 
@@ -489,18 +502,17 @@ export function renderAdminUi(env: Env): string {
     }
     function renderGeneratedNodeOptions() {
       const selected = new Set(selectedDerivedIds());
-      let html = '';
-      let lastSource = '';
+      const bySource = new Map();
       for (const item of state.generatedNodes) {
-        if (item.sourceName !== lastSource) {
-          lastSource = item.sourceName;
-          html += '<div class="derived-source">' + esc(lastSource) + '</div>';
-        }
-        const checked = selected.has(item.id) ? ' checked' : '';
-        const endpoint = item.endpointValue ? item.endpointValue + ' / ' + item.endpointType : 'direct-or-tunnel';
-        const traffic = item.tunnelHost ? 'SNI ' + item.tunnelHost : 'origin';
-        html += '<label class="derived-row"><input type="checkbox" data-derived-id="' + esc(item.id) + '"' + checked + '><span><span class="row-title"><strong>' + esc(endpoint) + '</strong><span class="small muted">' + esc(item.protocol) + '</span></span><span class="row-meta">' + esc(traffic) + '</span></span></label>';
+        const rows = bySource.get(item.sourceName) || [];
+        rows.push(item);
+        bySource.set(item.sourceName, rows);
       }
+      const html = Array.from(bySource.entries()).map(([sourceName, items]) => {
+        const chips = items.map((item, index) => derivedChipHtml(item, selected.has(item.id), index + 1)).join('');
+        const meta = items.length + ' derived';
+        return '<div class="chip-row"><div class="chip-row-title"><strong>' + esc(sourceName) + '</strong><span>' + esc(meta) + '</span></div><div class="chip-options">' + chips + '</div></div>';
+      }).join('');
       byId('groupCandidateList').innerHTML = html || '<div class="muted small">No generated nodes. Add nodes and endpoints first.</div>';
       updateGroupSelectedCount();
     }
@@ -554,11 +566,11 @@ export function renderAdminUi(env: Env): string {
     }
     function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
     function selectedDerivedIds() {
-      return Array.from(document.querySelectorAll('[data-derived-id]:checked')).map((input) => input.dataset.derivedId).filter(Boolean);
+      return Array.from(document.querySelectorAll('[data-derived-id].selected')).map((button) => button.dataset.derivedId).filter(Boolean);
     }
     function markDerivedCandidates(values) {
       const set = new Set(values || []);
-      document.querySelectorAll('[data-derived-id]').forEach((input) => { input.checked = set.has(input.dataset.derivedId); });
+      document.querySelectorAll('[data-derived-id]').forEach((button) => { button.classList.toggle('selected', set.has(button.dataset.derivedId)); });
       updateGroupSelectedCount();
     }
     function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
@@ -570,13 +582,27 @@ export function renderAdminUi(env: Env): string {
     function generatedLabel(id) {
       const item = state.generatedNodes.find((node) => node.id === id);
       if (!item) return id;
-      return item.sourceName + ' / ' + (item.endpointValue || item.tunnelHost || 'direct');
+      return item.sourceName + ' / ' + derivedShortLabel(item);
+    }
+    function derivedShortLabel(item) {
+      if (item.endpointValue) return item.endpointValue;
+      if (item.tunnelHost) return 'SNI ' + item.tunnelHost;
+      return 'Direct';
+    }
+    function derivedChipHtml(item, selected, index) {
+      const role = item.endpointType || (item.tunnelHost ? 'sni' : 'direct');
+      const title = derivedShortLabel(item);
+      const ordinal = String(index).padStart(2, '0');
+      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(title) + '"><span class="chip-main">' + esc(ordinal) + '</span><span class="chip-sub">' + esc(role) + '</span></button>';
+    }
+    function groupChipsHtml(ids) {
+      if (!ids || ids.length === 0) return '<span class="muted small">-</span>';
+      return '<div class="group-chip-row">' + ids.map((id) => '<span class="group-chip" title="' + esc(generatedLabel(id)) + '"><span>' + esc(generatedLabel(id)) + '</span></span>').join('') + '</div>';
     }
 
     document.body.addEventListener('change', (e) => {
       const t = e.target;
       if (t && t.dataset && t.dataset.bindingNode) updateBindingSelectedCount();
-      if (t && t.dataset && t.dataset.derivedId) updateGroupSelectedCount();
     });
 
     document.body.addEventListener('click', async (e) => {
@@ -586,6 +612,10 @@ export function renderAdminUi(env: Env): string {
         if (t.dataset.copy) {
           await navigator.clipboard.writeText(t.dataset.copy);
           setNotice('Copied.', 'ok');
+        }
+        if (t.dataset.derivedId) {
+          t.classList.toggle('selected');
+          updateGroupSelectedCount();
         }
         if (t.dataset.restart) {
           await api('/api/admin/tunnels/' + t.dataset.restart + '/restart', { method: 'POST', body: '{}' });
