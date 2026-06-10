@@ -234,7 +234,7 @@ export function renderAdminUi(env: Env): string {
                 <h3>Nodes To Update</h3>
                 <div class="actions"><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
               </div>
-              <div id="bindingNodeList" class="check-list"></div>
+              <select id="bindingNodes" multiple></select>
             </div>
             <div class="subpanel stack">
               <label>Tunnel / SNI<select id="bindingTraffic" multiple></select></label>
@@ -484,12 +484,12 @@ export function renderAdminUi(env: Env): string {
       byId('bindingTraffic').innerHTML = options;
     }
     function renderBindingNodeList() {
-      const selected = new Set(selectedBindingNodeIds());
-      byId('bindingNodeList').innerHTML = state.nodes.map((n) => {
-        const checked = selected.has(n.id) ? ' checked' : '';
-        const traffic = n.use_tunnel ? (n.tunnel_public_hostname || 'tunnel selected') : 'direct';
-        return '<label class="check-row"><input type="checkbox" data-binding-node="' + esc(n.id) + '"' + checked + '><span><span class="row-title"><strong>' + esc(n.name) + '</strong><span class="small muted">' + esc(n.protocol) + '</span></span><span class="row-meta">' + esc(traffic) + '</span></span></label>';
-      }).join('') || '<div class="muted small">No nodes available.</div>';
+      const selected = selectedBindingNodeIds();
+      byId('bindingNodes').innerHTML = state.nodes.map((n) => {
+        const traffic = n.use_tunnel ? 'tunnel' : 'direct';
+        return '<option value="' + esc(n.id) + '">' + esc(n.name + ' / ' + n.protocol + ' / ' + traffic) + '</option>';
+      }).join('');
+      markSelected(byId('bindingNodes'), selected);
       updateBindingSelectedCount();
     }
     function renderEndpointOptions() {
@@ -558,11 +558,10 @@ export function renderAdminUi(env: Env): string {
       markDerivedCandidates([]);
     }
     function selectedBindingNodeIds() {
-      return Array.from(document.querySelectorAll('[data-binding-node]:checked')).map((input) => input.dataset.bindingNode).filter(Boolean);
+      return selectedValues(byId('bindingNodes'));
     }
     function markBindingNodes(values) {
-      const set = new Set(values || []);
-      document.querySelectorAll('[data-binding-node]').forEach((input) => { input.checked = set.has(input.dataset.bindingNode); });
+      markSelected(byId('bindingNodes'), values || []);
       updateBindingSelectedCount();
     }
     function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
@@ -591,8 +590,15 @@ export function renderAdminUi(env: Env): string {
     }
     function generatedLabel(id) {
       const item = state.generatedNodes.find((node) => node.id === id);
-      if (!item) return id;
+      if (!item) {
+        const legacy = state.generatedNodes.find((node) => legacyGeneratedId(node) === id);
+        if (!legacy) return id;
+        return legacy.sourceName + ' / ' + derivedShortLabel(legacy);
+      }
       return item.sourceName + ' / ' + derivedShortLabel(item);
+    }
+    function legacyGeneratedId(item) {
+      return item.sourceNodeId + ':' + (item.endpointId || 'direct');
     }
     function derivedShortLabel(item) {
       if (item.endpointId) return endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId;
@@ -615,7 +621,7 @@ export function renderAdminUi(env: Env): string {
 
     document.body.addEventListener('change', (e) => {
       const t = e.target;
-      if (t && t.dataset && t.dataset.bindingNode) updateBindingSelectedCount();
+      if (t && t.id === 'bindingNodes') updateBindingSelectedCount();
     });
 
     document.body.addEventListener('click', async (e) => {
@@ -765,10 +771,10 @@ export function renderAdminUi(env: Env): string {
             selectedEndpointIds: selectedValues(byId('bindingEndpoints'))
           })
         })));
-        setNotice('Binding applied to ' + ids.length + ' node(s).', 'ok');
         await refreshNodes();
         await refreshGeneratedNodes();
         await refreshGroups();
+        setNotice('Binding applied to ' + ids.length + ' node(s).', 'ok');
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -782,10 +788,10 @@ export function renderAdminUi(env: Env): string {
           body: JSON.stringify({ selectedEndpointIds: [] })
         })));
         markSelected(byId('bindingEndpoints'), []);
-        setNotice('Additional endpoint selections cleared for ' + ids.length + ' node(s).', 'ok');
         await refreshNodes();
         await refreshGeneratedNodes();
         await refreshGroups();
+        setNotice('Additional endpoint selections cleared for ' + ids.length + ' node(s).', 'ok');
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
