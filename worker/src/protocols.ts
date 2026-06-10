@@ -57,30 +57,71 @@ function targetPort(rawPort: string | null, ctx: MutationContext): string {
   return rawPort && rawPort !== "" ? rawPort : "443";
 }
 
-function tunnelHost(ctx: MutationContext): string | null {
-  return ctx.tunnelHost || ctx.endpoint?.value || null;
+function splitHostCandidates(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function pickHostForContext(values: string[], ctx: MutationContext): string | null {
+  if (ctx.tunnelHost) return ctx.tunnelHost;
+  if (ctx.endpoint) return values[1] || values[0] || null;
+  return values[0] || null;
+}
+
+function urlHostCandidates(url: URL): string[] {
+  return [
+    ...splitHostCandidates(url.searchParams.get("sni")),
+    ...splitHostCandidates(url.searchParams.get("peer")),
+    ...splitHostCandidates(url.searchParams.get("host"))
+  ];
+}
+
+function vmessHostCandidates(parsed: JsonRecord): string[] {
+  return [
+    ...splitHostCandidates(parsed.sni),
+    ...splitHostCandidates(parsed.host)
+  ];
+}
+
+function outboundHostCandidates(output: JsonRecord): string[] {
+  const tls = typeof output.tls === "object" && output.tls !== null && !Array.isArray(output.tls)
+    ? (output.tls as JsonRecord)
+    : {};
+  const transport = typeof output.transport === "object" && output.transport !== null && !Array.isArray(output.transport)
+    ? (output.transport as JsonRecord)
+    : {};
+  const headers = typeof transport.headers === "object" && transport.headers !== null && !Array.isArray(transport.headers)
+    ? (transport.headers as JsonRecord)
+    : {};
+  return [
+    ...splitHostCandidates(tls.server_name),
+    ...splitHostCandidates(headers.Host)
+  ];
+}
+
+function writeUrlTlsHost(url: URL, host: string, force: boolean): void {
+  if (force || url.searchParams.has("sni")) url.searchParams.set("sni", host);
+  if (url.searchParams.has("peer")) url.searchParams.set("peer", host);
+  const type = (url.searchParams.get("type") || "").toLowerCase();
+  if (force || url.searchParams.has("host") || type === "ws" || type === "http" || type === "xhttp" || type === "h2") {
+    url.searchParams.set("host", host);
+  }
+  if (type === "grpc" && !url.searchParams.has("serviceName")) {
+    url.searchParams.set("serviceName", "");
+  }
 }
 
 function mutateUrlUri(raw: string, ctx: MutationContext): string {
   const url = new URL(raw);
   const server = targetServer(ctx);
-  if (!server) return raw;
-  const host = tunnelHost(ctx) || server;
-  url.hostname = server;
-  url.port = targetPort(url.port, ctx);
+  const host = pickHostForContext(urlHostCandidates(url), ctx);
+  if (server) {
+    url.hostname = server;
+    url.port = targetPort(url.port, ctx);
+  }
   url.hash = `#${encodeURIComponent(displayName(ctx.node, ctx.endpoint))}`;
-  if (ctx.tunnelHost) {
-    const keys = ["sni", "peer"];
-    for (const key of keys) {
-      if (url.searchParams.has(key) || key === "sni") url.searchParams.set(key, host);
-    }
-    const type = (url.searchParams.get("type") || "").toLowerCase();
-    if (type === "ws" || url.searchParams.has("host")) {
-      url.searchParams.set("host", host);
-    }
-    if (type === "grpc" && !url.searchParams.has("serviceName")) {
-      url.searchParams.set("serviceName", "");
-    }
+  if (host) {
+    writeUrlTlsHost(url, host, Boolean(ctx.tunnelHost || ctx.endpoint));
   }
   return url.toString();
 }
@@ -89,12 +130,13 @@ function mutateVmess(raw: string, ctx: MutationContext): string {
   const encoded = raw.replace(/^vmess:\/\//i, "");
   const parsed = JSON.parse(decodeBase64(encoded)) as JsonRecord;
   const server = targetServer(ctx);
-  if (!server) return raw;
-  const host = tunnelHost(ctx) || server;
-  parsed.add = server;
-  parsed.port = targetPort(typeof parsed.port === "string" || typeof parsed.port === "number" ? String(parsed.port) : null, ctx);
+  const host = pickHostForContext(vmessHostCandidates(parsed), ctx);
+  if (server) {
+    parsed.add = server;
+    parsed.port = targetPort(typeof parsed.port === "string" || typeof parsed.port === "number" ? String(parsed.port) : null, ctx);
+  }
   parsed.ps = displayName(ctx.node, ctx.endpoint);
-  if (ctx.tunnelHost) {
+  if (host) {
     parsed.sni = host;
     parsed.host = host;
   }
@@ -214,29 +256,31 @@ function cloneRecord(input: JsonRecord): JsonRecord {
 function mutateOutboundObject(raw: JsonRecord, ctx: MutationContext): JsonRecord {
   const output = cloneRecord(raw);
   const server = targetServer(ctx);
-  if (!server) return output;
-  output.server = server;
-  output.server_port = Number(targetPort(
-    typeof output.server_port === "string" || typeof output.server_port === "number" ? String(output.server_port) : null,
-    ctx
-  ));
+  const host = pickHostForContext(outboundHostCandidates(output), ctx);
+  if (server) {
+    output.server = server;
+    output.server_port = Number(targetPort(
+      typeof output.server_port === "string" || typeof output.server_port === "number" ? String(output.server_port) : null,
+      ctx
+    ));
+  }
   output.tag = displayName(ctx.node, ctx.endpoint);
-  if (ctx.tunnelHost) {
+  if (host) {
     const tls = typeof output.tls === "object" && output.tls !== null && !Array.isArray(output.tls)
       ? (output.tls as JsonRecord)
       : {};
     tls.enabled = tls.enabled ?? true;
-    tls.server_name = ctx.tunnelHost;
+    tls.server_name = host;
     output.tls = tls;
 
     const transport = typeof output.transport === "object" && output.transport !== null && !Array.isArray(output.transport)
       ? (output.transport as JsonRecord)
       : {};
-    if ((transport.type === "ws" || transport.type === "http") && ctx.tunnelHost) {
+    if (transport.type === "ws" || transport.type === "http" || transport.type === "xhttp") {
       const headers = typeof transport.headers === "object" && transport.headers !== null && !Array.isArray(transport.headers)
         ? (transport.headers as JsonRecord)
         : {};
-      headers.Host = ctx.tunnelHost;
+      headers.Host = host;
       transport.headers = headers;
       output.transport = transport;
     }
@@ -275,12 +319,13 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
   try {
     if (protocol === "vless" || protocol === "trojan") {
       const url = new URL(raw);
+      const host = pickHostForContext(urlHostCandidates(url), ctx) || server;
       const outbound: JsonRecord = {
         type: protocol,
         tag,
         server,
         server_port: Number(targetPort(url.port, ctx)),
-        tls: { enabled: true, server_name: ctx.tunnelHost || server }
+        tls: { enabled: true, server_name: host }
       };
       if (protocol === "vless") {
         outbound.uuid = decodeURIComponent(url.username);
@@ -292,13 +337,14 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
         outbound.transport = {
           type: "ws",
           path: url.searchParams.get("path") || "/",
-          headers: { Host: ctx.tunnelHost || server }
+          headers: { Host: host }
         } as unknown as JsonRecord;
       }
       return { ...base, outbound };
     }
     if (protocol === "vmess") {
       const vmess = JSON.parse(decodeBase64(raw.replace(/^vmess:\/\//i, ""))) as JsonRecord;
+      const host = pickHostForContext(vmessHostCandidates(vmess), ctx) || server;
       return {
         ...base,
         outbound: {
@@ -308,7 +354,7 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
           server_port: Number(targetPort(typeof vmess.port === "string" || typeof vmess.port === "number" ? String(vmess.port) : null, ctx)),
           uuid: typeof vmess.id === "string" ? vmess.id : "",
           security: typeof vmess.scy === "string" ? vmess.scy : "auto",
-          tls: { enabled: true, server_name: ctx.tunnelHost || server }
+          tls: { enabled: true, server_name: host }
         } as JsonRecord
       };
     }

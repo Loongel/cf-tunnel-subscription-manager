@@ -114,9 +114,28 @@ interface RawConfigInfo {
   server?: string;
   port?: string;
   sni?: string;
+  host?: string;
   transport?: string;
+  tlsParams?: Record<string, string>;
+  vmessTlsParams?: JsonRecord;
+  singBoxTls?: JsonRecord;
   tls: boolean;
 }
+
+const SHARE_TLS_PARAM_KEYS = [
+  "security",
+  "sni",
+  "peer",
+  "fp",
+  "alpn",
+  "allowInsecure",
+  "pbk",
+  "sid",
+  "spx",
+  "flow"
+];
+
+const VMESS_TLS_KEYS = ["sni", "host", "fp", "alpn", "allowInsecure"];
 
 export function inspectRawConfig(rawConfig: string, sourceType = "v2ray_uri"): RawConfigInfo {
   if (sourceType === "sing_box_outbound") return inspectSingBoxRawConfig(rawConfig);
@@ -125,11 +144,14 @@ export function inspectRawConfig(rawConfig: string, sourceType = "v2ray_uri"): R
     const url = new URL(rawConfig);
     const security = (url.searchParams.get("security") || "").toLowerCase();
     const sni = url.searchParams.get("sni") || url.searchParams.get("peer") || url.searchParams.get("host") || undefined;
+    const tlsParams = pickSearchParams(url.searchParams, SHARE_TLS_PARAM_KEYS);
     return {
       server: url.hostname || undefined,
       port: url.port || undefined,
       sni,
+      host: url.searchParams.get("host") || undefined,
       transport: url.searchParams.get("type") || undefined,
+      tlsParams,
       tls: security === "tls" || url.port === "443" || Boolean(sni)
     };
   } catch {
@@ -156,7 +178,9 @@ function inspectVmessRawConfig(rawConfig: string): RawConfigInfo {
       server,
       port,
       sni,
+      host: typeof parsed.host === "string" ? parsed.host : undefined,
       transport: network,
+      vmessTlsParams: pickRecordStrings(parsed, VMESS_TLS_KEYS),
       tls: parsed.tls === "tls" || port === "443" || Boolean(sni)
     };
   } catch {
@@ -172,6 +196,7 @@ function inspectSingBoxRawConfig(rawConfig: string): RawConfigInfo {
       : parsed;
     const tls = isRecord(outbound.tls) ? outbound.tls : {};
     const transport = isRecord(outbound.transport) ? outbound.transport : {};
+    const headers = isRecord(transport.headers) ? transport.headers : {};
     const server = typeof outbound.server === "string" ? outbound.server : undefined;
     const port = typeof outbound.server_port === "string" || typeof outbound.server_port === "number" ? String(outbound.server_port) : undefined;
     const sni = typeof tls.server_name === "string" ? tls.server_name : undefined;
@@ -179,7 +204,9 @@ function inspectSingBoxRawConfig(rawConfig: string): RawConfigInfo {
       server,
       port,
       sni,
+      host: typeof headers.Host === "string" ? headers.Host : undefined,
       transport: typeof transport.type === "string" ? transport.type : undefined,
+      singBoxTls: isRecord(tls) ? { ...tls } : undefined,
       tls: tls.enabled === true || port === "443" || Boolean(sni)
     };
   } catch {
@@ -193,10 +220,13 @@ function composeShareRawConfig(rawConfig: string, carrier: RawConfigInfo): strin
     url.hostname = carrier.server || url.hostname;
     if (carrier.port) url.port = carrier.port;
     if (carrier.tls) url.searchParams.set("security", "tls");
+    for (const [key, value] of Object.entries(carrier.tlsParams || {})) {
+      url.searchParams.set(key, value);
+    }
     if (carrier.sni || carrier.server) url.searchParams.set("sni", carrier.sni || carrier.server || "");
     const transport = (url.searchParams.get("type") || "").toLowerCase();
-    if ((transport === "ws" || transport === "http") && (carrier.sni || carrier.server)) {
-      url.searchParams.set("host", carrier.sni || carrier.server || "");
+    if ((transport === "ws" || transport === "http" || transport === "xhttp" || transport === "h2") && (carrier.host || carrier.sni || carrier.server)) {
+      url.searchParams.set("host", carrier.host || carrier.sni || carrier.server || "");
     }
     return url.toString();
   } catch {
@@ -210,9 +240,12 @@ function composeVmessRawConfig(rawConfig: string, carrier: RawConfigInfo): strin
     parsed.add = carrier.server || parsed.add;
     if (carrier.port) parsed.port = carrier.port;
     if (carrier.tls) parsed.tls = "tls";
+    for (const [key, value] of Object.entries(carrier.vmessTlsParams || {})) {
+      parsed[key] = value;
+    }
     if (carrier.sni || carrier.server) {
       parsed.sni = carrier.sni || carrier.server || "";
-      parsed.host = carrier.sni || carrier.server || "";
+      parsed.host = carrier.host || carrier.sni || carrier.server || "";
     }
     return `vmess://${encodeBase64(JSON.stringify(parsed))}`;
   } catch {
@@ -230,20 +263,39 @@ function composeSingBoxRawConfig(rawConfig: string, carrier: RawConfigInfo): str
     if (carrier.port) outbound.server_port = Number(carrier.port);
     if (carrier.tls) {
       const tls = isRecord(outbound.tls) ? (outbound.tls as JsonRecord) : {};
+      Object.assign(tls, carrier.singBoxTls || {});
       tls.enabled = true;
       tls.server_name = carrier.sni || carrier.server || "";
       outbound.tls = tls;
     }
     const transport = isRecord(outbound.transport) ? (outbound.transport as JsonRecord) : null;
-    if (transport && (transport.type === "ws" || transport.type === "http")) {
+    if (transport && (transport.type === "ws" || transport.type === "http" || transport.type === "xhttp")) {
       const headers = isRecord(transport.headers) ? (transport.headers as JsonRecord) : {};
-      headers.Host = carrier.sni || carrier.server || "";
+      headers.Host = carrier.host || carrier.sni || carrier.server || "";
       transport.headers = headers;
     }
     return JSON.stringify(parsed);
   } catch {
     return rawConfig;
   }
+}
+
+function pickSearchParams(params: URLSearchParams, keys: string[]): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value) output[key] = value;
+  }
+  return output;
+}
+
+function pickRecordStrings(record: JsonRecord, keys: string[]): JsonRecord {
+  const output: JsonRecord = {};
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") output[key] = value;
+  }
+  return output;
 }
 
 

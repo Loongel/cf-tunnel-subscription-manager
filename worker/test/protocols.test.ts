@@ -63,6 +63,40 @@ describe("protocol adapter", () => {
     expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
   });
 
+  it("selects SNI deterministically for direct, endpoint-derived, and configured traffic nodes", () => {
+    const raw = "vless://uuid@example.com:443?type=ws&security=tls&sni=first.example.com,second.example.com&host=first.example.com,second.example.com&path=%2F#old";
+    const direct = mutateShareUri(raw, {
+      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      format: "v2ray"
+    });
+    const directUrl = new URL(direct.uri || "");
+    expect(directUrl.hostname).toBe("example.com");
+    expect(directUrl.searchParams.get("sni")).toBe("first.example.com");
+    expect(directUrl.searchParams.get("host")).toBe("first.example.com");
+
+    const endpointDerived = mutateShareUri(raw, {
+      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      endpoint,
+      format: "v2ray"
+    });
+    const endpointUrl = new URL(endpointDerived.uri || "");
+    expect(endpointUrl.hostname).toBe("162.159.1.1");
+    expect(endpointUrl.port).toBe("443");
+    expect(endpointUrl.searchParams.get("sni")).toBe("second.example.com");
+    expect(endpointUrl.searchParams.get("host")).toBe("second.example.com");
+
+    const configured = mutateShareUri(raw, {
+      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      tunnelHost: "configured.example.com",
+      endpoint,
+      format: "v2ray"
+    });
+    const configuredUrl = new URL(configured.uri || "");
+    expect(configuredUrl.hostname).toBe("162.159.1.1");
+    expect(configuredUrl.searchParams.get("sni")).toBe("configured.example.com");
+    expect(configuredUrl.searchParams.get("host")).toBe("configured.example.com");
+  });
+
   it("mutates VMess host fields", () => {
     const vmess = {
       v: "2",
@@ -160,15 +194,17 @@ describe("protocol adapter", () => {
   });
 
   it("composes HTTP content nodes under a TLS carrier before import", () => {
-    const carrier = "vless://carrier@example.com:443?type=ws&security=tls&sni=edge.example.com#carrier";
-    const child = "vless://child@origin.example.net:80?type=ws&path=%2Fapp#content";
+    const carrier = "vless://carrier@example.com:443?type=ws&security=tls&sni=edge.example.com,edge-alt.example.com&host=edge.example.com,edge-alt.example.com&fp=chrome&alpn=h2%2Chttp%2F1.1#carrier";
+    const child = "vless://child@origin.example.net:80?type=ws&security=none&sni=old.example.com&host=old.example.com&path=%2Fapp#content";
     const composed = composeFallbackRawConfig(child, "v2ray_uri", carrier, "v2ray_uri");
     const parsed = new URL(composed);
     expect(parsed.hostname).toBe("example.com");
     expect(parsed.port).toBe("443");
     expect(parsed.searchParams.get("security")).toBe("tls");
-    expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
-    expect(parsed.searchParams.get("host")).toBe("edge.example.com");
+    expect(parsed.searchParams.get("sni")).toBe("edge.example.com,edge-alt.example.com");
+    expect(parsed.searchParams.get("host")).toBe("edge.example.com,edge-alt.example.com");
+    expect(parsed.searchParams.get("fp")).toBe("chrome");
+    expect(parsed.searchParams.get("alpn")).toBe("h2,http/1.1");
     expect(parsed.searchParams.get("path")).toBe("/app");
   });
 });
