@@ -1,11 +1,7 @@
 import { all, first } from "./db";
 import { encodeBase64, mutateShareUri, toSingBoxOutbound } from "./protocols";
 import type { Env, GeneratedNode, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions } from "./types";
-
-interface ScopeRow {
-  endpoint_id: string;
-  proxy_node_id: string;
-}
+import { parseJsonObject } from "./utils";
 
 interface SelectionRow {
   endpoint_id: string;
@@ -15,6 +11,8 @@ interface SelectionRow {
 
 interface GroupRow {
   endpoint_mode: SubscriptionOptions["endpointMode"];
+  endpoint_filter_json: string;
+  enabled: number;
 }
 
 const VALID_ENDPOINT_MODES = new Set(["selected", "ip", "domain", "all", "none"]);
@@ -91,19 +89,6 @@ export async function previewSubscription(env: Env, options: SubscriptionOptions
 
 async function loadNodes(env: Env, options: SubscriptionOptions): Promise<ProxyNodeRow[]> {
   const enabledClause = options.includeDisabled ? "" : "AND n.enabled = 1";
-  if (options.group) {
-    return await all<ProxyNodeRow>(
-      env.DB,
-      `SELECT n.*, t.public_hostname AS tunnel_public_hostname, t.public_url AS tunnel_public_url
-       FROM proxy_nodes n
-       JOIN group_members gm ON gm.proxy_node_id = n.id
-       JOIN groups g ON g.id = gm.group_id
-       LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
-       WHERE g.name = ? AND g.enabled = 1 ${enabledClause}
-       ORDER BY n.name`,
-      options.group
-    );
-  }
   return await all<ProxyNodeRow>(
     env.DB,
     `SELECT n.*, t.public_hostname AS tunnel_public_hostname, t.public_url AS tunnel_public_url
@@ -114,24 +99,23 @@ async function loadNodes(env: Env, options: SubscriptionOptions): Promise<ProxyN
   );
 }
 
+export async function listGeneratedNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
+  return await generateNodes(env, options);
+}
+
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, endpoints, scopes, selections] = await Promise.all([
+  const [nodes, endpoints, selections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
       "SELECT * FROM preferred_endpoints WHERE enabled = 1 ORDER BY sort_order, value"
     ),
-    all<ScopeRow>(env.DB, "SELECT * FROM preferred_endpoint_node_scopes"),
-    all<SelectionRow>(env.DB, "SELECT * FROM proxy_node_endpoint_selections WHERE enabled = 1")
+    all<SelectionRow>(env.DB, "SELECT * FROM proxy_node_endpoint_selections WHERE enabled = 1"),
+    loadGroupFilter(env, effectiveOptions.group)
   ]);
 
-  const scopesByEndpoint = new Map<string, Set<string>>();
-  for (const scope of scopes) {
-    const set = scopesByEndpoint.get(scope.endpoint_id) || new Set<string>();
-    set.add(scope.proxy_node_id);
-    scopesByEndpoint.set(scope.endpoint_id, set);
-  }
+  if (groupFilter?.exists === false) return [];
 
   const selectedByNode = new Map<string, Set<string>>();
   for (const selection of selections) {
@@ -143,11 +127,7 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
   const output: GeneratedNode[] = [];
   for (const node of nodes) {
     const tunnelHost = node.use_tunnel ? node.tunnel_public_hostname : null;
-    const available = endpoints.filter((endpoint) => {
-      if (endpoint.scope === "global") return true;
-      return scopesByEndpoint.get(endpoint.id)?.has(node.id) || false;
-    });
-    const selected = selectEndpoints(node.id, available, selectedByNode, effectiveOptions.endpointMode);
+    const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
 
     if (!node.use_tunnel || !tunnelHost) {
       output.push(generateOne(node, null, null, effectiveOptions));
@@ -163,18 +143,63 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
       output.push(generateOne(node, tunnelHost, endpoint, effectiveOptions));
     }
   }
-  return output;
+  return filterGeneratedByGroup(output, groupFilter);
 }
 
 async function withGroupDefaults(env: Env, options: SubscriptionOptions): Promise<SubscriptionOptions> {
   if (!options.group || options.endpointModeExplicit) return options;
   const group = await first<GroupRow>(
     env.DB,
-    "SELECT endpoint_mode FROM groups WHERE name = ? AND enabled = 1",
+    "SELECT endpoint_mode, endpoint_filter_json, enabled FROM groups WHERE name = ? AND enabled = 1",
     options.group
   );
   if (!group || !VALID_ENDPOINT_MODES.has(group.endpoint_mode)) return options;
   return { ...options, endpointMode: group.endpoint_mode };
+}
+
+async function loadGroupFilter(
+  env: Env,
+  groupName: string | null | undefined
+): Promise<{ exists: boolean; derivedIds?: Set<string>; legacyNodeIds?: Set<string> } | null> {
+  if (!groupName) return null;
+  const group = await first<GroupRow>(
+    env.DB,
+    "SELECT endpoint_mode, endpoint_filter_json, enabled FROM groups WHERE name = ? AND enabled = 1",
+    groupName
+  );
+  if (!group) return { exists: false };
+
+  const filter = parseJsonObject(group.endpoint_filter_json);
+  if (Array.isArray(filter.derivedNodeIds)) {
+    return {
+      exists: true,
+      derivedIds: new Set(filter.derivedNodeIds.filter((id): id is string => typeof id === "string"))
+    };
+  }
+
+  const legacyRows = await all<{ proxy_node_id: string }>(
+    env.DB,
+    `SELECT gm.proxy_node_id
+     FROM group_members gm
+     JOIN groups g ON g.id = gm.group_id
+     WHERE g.name = ? AND g.enabled = 1`,
+    groupName
+  );
+  return {
+    exists: true,
+    legacyNodeIds: new Set(legacyRows.map((row) => row.proxy_node_id))
+  };
+}
+
+function filterGeneratedByGroup(
+  generated: GeneratedNode[],
+  groupFilter: { exists: boolean; derivedIds?: Set<string>; legacyNodeIds?: Set<string> } | null
+): GeneratedNode[] {
+  if (!groupFilter) return generated;
+  if (groupFilter.exists === false) return [];
+  if (groupFilter.derivedIds) return generated.filter((item) => groupFilter.derivedIds?.has(item.id));
+  if (groupFilter.legacyNodeIds) return generated.filter((item) => groupFilter.legacyNodeIds?.has(item.sourceNodeId));
+  return [];
 }
 
 function selectEndpoints(
@@ -190,10 +215,9 @@ function selectEndpoints(
   if (mode === "all") return available;
 
   const selected = selectedByNode.get(nodeId);
-  if (!selected || selected.size === 0) {
-    return available.filter((endpoint) => endpoint.scope === "global" && endpoint.default_selected);
-  }
-  return available.filter((endpoint) => selected.has(endpoint.id));
+  const global = available.filter((endpoint) => endpoint.scope === "global");
+  if (!selected || selected.size === 0) return global;
+  return available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id));
 }
 
 function generateOne(

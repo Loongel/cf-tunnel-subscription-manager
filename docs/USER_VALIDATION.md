@@ -53,10 +53,11 @@ subscription preview: generatedCount = 1, protocol vless = 1
 2. Enter a wrong token and click `Login`. The notice bar should show a visible login failure.
 3. Enter the admin token and click `Login`. Events, tunnels, nodes, endpoints, groups, and subscription links should load.
 4. In `Proxy Nodes`, add or edit a node only in `Node Sources`; tunnel and endpoint choices should not appear in that form.
-5. In `Proxy Nodes`, use `Traffic Binding` to select one or more nodes, choose `Direct` or `Cloudflare Tunnel`, then apply preferred endpoints.
-6. In `Preferred Endpoints`, paste IPs/domains separated by commas, spaces, or newlines into `Values`; one click should create multiple endpoint rows.
+5. In `Proxy Nodes`, use `Traffic Binding` as a master/detail editor: select one or more rows under `Nodes To Update`, choose one `Tunnel / SNI`, then apply additional preferred endpoints.
+6. In `Preferred Endpoints`, paste IPs/domains separated by commas, spaces, or newlines into `Values`; one click should create multiple endpoint rows. `Global Always On` endpoints are automatically used by every tunnel-backed node. `Binding Option` endpoints are selected from `Traffic Binding`.
 7. In `Proxy Nodes`, use `Import From Subscription` with either subscription URLs or pasted subscription content. Supported imports are share links, base64 V2Ray-style subscriptions, and sing-box outbound JSON.
-8. In `Subscriptions`, preview V2Ray, PassWall2, and sing-box output after adding nodes and endpoints.
+8. In `Subscriptions`, create groups by selecting generated derived nodes from the member block. Group preview should only include the selected derived members.
+9. In `Subscriptions`, preview V2Ray, PassWall2, and sing-box output after adding nodes and endpoints.
 
 ## Browser Flow Verified
 
@@ -69,7 +70,9 @@ The UI was tested with Playwright on `hd01`:
 - Batch preferred endpoint creation works from comma/newline-separated values.
 - Proxy node creation works.
 - Subscription content import creates proxy nodes.
-- Traffic binding updates tunnel and preferred endpoint selections separately from node source editing.
+- Traffic binding uses `Tunnel / SNI` as a single traffic selector and updates tunnel plus additional endpoint selections separately from node source editing.
+- Global endpoints are generated for tunnel-backed nodes automatically and are not removable from node binding.
+- Group creation stores selected derived-node ids and subscription preview filters to those generated members.
 - Subscription preview generated one VLESS node.
 - Subscription links render in the Subscriptions tab.
 

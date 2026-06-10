@@ -10,72 +10,133 @@ export function renderAdminUi(env: Env): string {
   <title>CF Tunnel Control</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --line: #d8dee8;
-      --soft: #eef2f6;
-      --text: #17202a;
-      --muted: #647181;
-      --accent: #0f766e;
-      --accent-weak: #e6f4f1;
-      --bad: #b42318;
-      --warn: #b54708;
-      --ok: #067647;
+      color-scheme: dark;
+      --bg: #090b0f;
+      --panel: #10151d;
+      --panel-2: #151b24;
+      --panel-3: #0d1118;
+      --line: #263241;
+      --line-strong: #385166;
+      --text: #e7edf3;
+      --muted: #8fa1b3;
+      --faint: #5f7184;
+      --accent: #22d3ee;
+      --accent-2: #7dd3fc;
+      --ok: #38d996;
+      --warn: #f5c451;
+      --bad: #ff6b6b;
+      --purple: #b28cff;
+      --shadow: rgba(0, 0, 0, 0.35);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 10; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px),
+        var(--bg);
+      background-size: 34px 34px;
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(12, 17, 24, 0.94);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
     h1 { font-size: 18px; margin: 0; letter-spacing: 0; }
     h2 { font-size: 15px; margin: 0; letter-spacing: 0; }
-    h3 { font-size: 14px; margin: 0 0 10px; letter-spacing: 0; }
-    main { max-width: 1440px; margin: 0 auto; padding: 16px; }
+    h3 { font-size: 13px; margin: 0; letter-spacing: 0; color: var(--text); }
+    main { max-width: 1480px; margin: 0 auto; padding: 16px; }
     nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
     button, input, select, textarea { font: inherit; }
-    button { border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 6px; padding: 7px 10px; cursor: pointer; min-height: 34px; white-space: nowrap; }
-    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-    button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+    button {
+      border: 1px solid var(--line);
+      background: #111923;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 10px;
+      cursor: pointer;
+      min-height: 34px;
+      white-space: nowrap;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: #0d8092; color: #f5feff; border-color: #21bed6; box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.12) inset; }
+    button.active { border-color: var(--accent); color: var(--accent); background: rgba(34, 211, 238, 0.09); }
     button.danger { color: var(--bad); }
+    button.subtle { color: var(--muted); }
     button:disabled { cursor: not-allowed; opacity: 0.55; }
     label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
-    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; color: var(--text); min-height: 36px; }
-    select[multiple] { min-height: 116px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      background: #0b1118;
+      color: var(--text);
+      min-height: 36px;
+      outline: none;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12); }
+    select[multiple] { min-height: 128px; }
     textarea { min-height: 108px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px; vertical-align: top; }
-    th { color: var(--muted); font-weight: 600; background: #fbfcfe; position: sticky; top: 62px; z-index: 2; }
+    th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 9px 8px; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; background: #111821; position: sticky; top: 62px; z-index: 2; }
     pre { white-space: pre-wrap; overflow: auto; max-height: 520px; }
-    .tokenbar { display: grid; grid-template-columns: minmax(200px, 420px) auto auto; gap: 8px; align-items: center; }
-    .notice { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; background: #fff; color: var(--muted); min-height: 38px; }
-    .notice.ok { color: var(--ok); border-color: #a9e3c5; background: #f0fdf4; }
-    .notice.error { color: var(--bad); border-color: #fecdca; background: #fff1f3; }
-    .notice.warn { color: var(--warn); border-color: #fedf89; background: #fffbeb; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brandmark { width: 26px; height: 26px; border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; color: var(--accent); background: rgba(34, 211, 238, 0.08); font-size: 14px; }
+    .tokenbar { display: grid; grid-template-columns: minmax(220px, 430px) auto auto; gap: 8px; align-items: center; }
+    .notice { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; background: rgba(16, 21, 29, 0.88); color: var(--muted); min-height: 38px; }
+    .notice.ok { color: var(--ok); border-color: rgba(56, 217, 150, 0.45); background: rgba(56, 217, 150, 0.09); }
+    .notice.error { color: var(--bad); border-color: rgba(255, 107, 107, 0.45); background: rgba(255, 107, 107, 0.08); }
+    .notice.warn { color: var(--warn); border-color: rgba(245, 196, 81, 0.45); background: rgba(245, 196, 81, 0.08); }
     .grid { display: grid; gap: 12px; }
     .metrics { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
-    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-height: 76px; }
-    .metric .value { font-size: 25px; line-height: 1; margin-top: 8px; }
-    .section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 14px; }
+    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-height: 78px; box-shadow: 0 12px 28px var(--shadow); }
+    .metric .value { font-size: 25px; line-height: 1; margin-top: 8px; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .section { background: rgba(16, 21, 29, 0.96); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 14px; box-shadow: 0 12px 28px var(--shadow); }
+    .subpanel { border: 1px solid var(--line); background: var(--panel-3); border-radius: 6px; padding: 10px; }
     .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .formgrid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; align-items: end; }
     .formgrid .wide { grid-column: span 2; }
     .formgrid .full { grid-column: 1 / -1; }
-    .split { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(340px, 0.92fr); gap: 12px; align-items: start; }
-    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 0.85fr); gap: 12px; align-items: start; }
     .stack { display: grid; gap: 12px; }
+    .binding-grid { display: grid; grid-template-columns: minmax(260px, 0.95fr) minmax(320px, 1.05fr); gap: 12px; align-items: stretch; }
     .hidden { display: none; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
     .muted { color: var(--muted); }
     .small { font-size: 12px; }
-    .status { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); background: #fff; white-space: nowrap; }
-    .status.healthy, .status.online, .status.enabled { color: var(--ok); border-color: #a9e3c5; background: #f0fdf4; }
-    .status.unhealthy, .status.failed, .status.offline, .status.disabled { color: var(--bad); border-color: #fecdca; background: #fff1f3; }
-    .status.degraded, .status.stale, .status.warning, .status.unknown { color: var(--warn); border-color: #fedf89; background: #fffbeb; }
-    .checkbox { width: 18px; min-height: 18px; }
-    @media (max-width: 980px) {
+    .count { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .status { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); background: #0c1219; white-space: nowrap; }
+    .status.healthy, .status.online, .status.enabled { color: var(--ok); border-color: rgba(56, 217, 150, 0.45); background: rgba(56, 217, 150, 0.09); }
+    .status.unhealthy, .status.failed, .status.offline, .status.disabled { color: var(--bad); border-color: rgba(255, 107, 107, 0.45); background: rgba(255, 107, 107, 0.08); }
+    .status.degraded, .status.stale, .status.warning, .status.unknown { color: var(--warn); border-color: rgba(245, 196, 81, 0.45); background: rgba(245, 196, 81, 0.08); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-items: center; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 8px; color: var(--accent-2); background: rgba(125, 211, 252, 0.08); font-size: 12px; }
+    .check-list { display: grid; gap: 7px; max-height: 332px; overflow: auto; padding-right: 2px; }
+    .check-row, .derived-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; border: 1px solid var(--line); background: #0b1118; border-radius: 6px; padding: 8px; color: var(--text); }
+    .check-row:hover, .derived-row:hover { border-color: var(--accent); }
+    .check-row input, .derived-row input { width: 16px; min-height: 16px; margin-top: 2px; }
+    .row-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
+    .row-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .derived-grid { display: grid; gap: 7px; max-height: 430px; overflow: auto; padding-right: 2px; }
+    .derived-source { color: var(--accent); font-size: 12px; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
-      .tokenbar, .metrics, .formgrid, .split, .two { grid-template-columns: 1fr; }
+      .tokenbar, .metrics, .formgrid, .split, .binding-grid { grid-template-columns: 1fr; }
       .formgrid .wide { grid-column: span 1; }
       th { position: static; }
     }
@@ -83,7 +144,7 @@ export function renderAdminUi(env: Env): string {
 </head>
 <body>
   <header>
-    <h1>CF Tunnel Control</h1>
+    <div class="brand"><div class="brandmark">CF</div><h1>CF Tunnel Control</h1></div>
     <div class="tokenbar">
       <input id="tokenInput" type="password" autocomplete="off" placeholder="Admin token">
       <button id="saveToken" class="primary">Login</button>
@@ -126,7 +187,7 @@ export function renderAdminUi(env: Env): string {
           <div class="section">
             <div class="toolbar">
               <h2>Node Sources</h2>
-              <div class="actions"><button id="refreshNodes">Refresh</button><button id="cancelNodeEdit">Cancel Edit</button></div>
+              <div class="actions"><button id="refreshNodes">Refresh</button><button id="cancelNodeEdit" class="subtle">Cancel Edit</button></div>
             </div>
             <div class="formgrid">
               <label>Name<input id="sourceName" placeholder="s1-vless"></label>
@@ -149,22 +210,36 @@ export function renderAdminUi(env: Env): string {
         </div>
 
         <div class="section">
-          <h2>Traffic Binding</h2>
-          <div class="formgrid">
-            <label class="wide">Nodes<select id="bindingNodes" multiple></select></label>
-            <label>Traffic Path<select id="bindingMode"><option value="direct">Direct</option><option value="tunnel">Cloudflare Tunnel</option></select></label>
-            <label>Tunnel<select id="bindingTunnel"></select></label>
-            <label class="wide">Preferred Endpoints<select id="bindingEndpoints" multiple></select></label>
-            <div class="actions">
-              <button id="applyBinding" class="primary">Apply Binding</button>
-              <button id="clearBindingEndpoints">Clear Endpoints</button>
+          <div class="toolbar">
+            <h2>Traffic Binding</h2>
+            <div class="small muted">Selected <span id="bindingSelectedCount" class="count">0</span></div>
+          </div>
+          <div class="binding-grid">
+            <div class="subpanel">
+              <div class="toolbar">
+                <h3>Nodes To Update</h3>
+                <div class="actions"><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
+              </div>
+              <div id="bindingNodeList" class="check-list"></div>
+            </div>
+            <div class="subpanel stack">
+              <label>Tunnel / SNI<select id="bindingTraffic"></select></label>
+              <div>
+                <label>Global Endpoints</label>
+                <div id="globalEndpointChips" class="chips"></div>
+              </div>
+              <label>Additional Endpoints<select id="bindingEndpoints" multiple></select></label>
+              <div class="actions">
+                <button id="applyBinding" class="primary">Apply To Selected Nodes</button>
+                <button id="clearBindingEndpoints" class="subtle">Clear Additional Endpoints</button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <div class="section">
-        <table><thead><tr><th>Select</th><th>Node</th><th>Protocol</th><th>Traffic Path</th><th>Endpoints</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="nodesBody"></tbody></table>
+        <table><thead><tr><th>Node</th><th>Protocol</th><th>Traffic</th><th>Endpoints</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="nodesBody"></tbody></table>
       </div>
     </section>
 
@@ -172,48 +247,61 @@ export function renderAdminUi(env: Env): string {
       <div class="section">
         <div class="toolbar">
           <h2>Preferred Endpoint Pool</h2>
-          <div class="actions"><button id="refreshEndpoints">Refresh</button><button id="cancelEndpointEdit">Cancel Edit</button></div>
+          <div class="actions"><button id="refreshEndpoints">Refresh</button><button id="cancelEndpointEdit" class="subtle">Cancel Edit</button></div>
         </div>
         <div class="formgrid">
           <label>Type<select id="endpointType"><option value="ip">IP</option><option value="domain">Domain</option></select></label>
-          <label>Availability<select id="endpointScope"><option value="global">Global Pool</option><option value="node">Selected Nodes</option></select></label>
-          <label>Fallback<select id="endpointDefault"><option value="false">Explicit Selection</option><option value="true">Default Fallback</option></select></label>
+          <label>Role<select id="endpointRole"><option value="global">Global Always On</option><option value="node">Binding Option</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
-          <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com"></textarea></label>
-          <label>Label<input id="endpointLabel" placeholder="optional"></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
-          <label class="wide">Visible To<select id="endpointNodes" multiple></select></label>
+          <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com"></textarea></label>
+          <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
           <div class="actions"><button id="createEndpoint" class="primary">Add Endpoints</button></div>
         </div>
       </div>
       <div class="section">
-        <table><thead><tr><th>Type</th><th>Value</th><th>Availability</th><th>Fallback</th><th>Visible To</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
+        <table><thead><tr><th>Type</th><th>Value</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
       </div>
     </section>
 
     <section id="subscriptions" class="view hidden">
       <div class="split">
-        <div class="section">
-          <div class="toolbar"><h2>Subscription Links</h2><button id="rotateSubscriptionToken" class="danger">Rotate Token</button></div>
-          <table><tbody id="subscriptionLinks"></tbody></table>
-          <h2>Groups</h2>
-          <div class="formgrid">
-            <label>Group Name<input id="groupName" placeholder="group"></label>
-            <label class="wide">Members<select id="groupNodes" multiple></select></label>
-            <label>Endpoint Mode<select id="groupEndpointMode"><option value="selected">Node Selections</option><option value="ip">IP Only</option><option value="domain">Domain Only</option><option value="all">All Visible</option><option value="none">No Preferred Endpoint</option></select></label>
-            <div class="actions"><button id="createGroup" class="primary">Add Group</button></div>
+        <div class="stack">
+          <div class="section">
+            <div class="toolbar"><h2>Subscription Links</h2><button id="rotateSubscriptionToken" class="danger">Rotate Token</button></div>
+            <table><tbody id="subscriptionLinks"></tbody></table>
           </div>
-          <table><thead><tr><th>Name</th><th>Endpoint Mode</th><th>Members</th><th>Actions</th></tr></thead><tbody id="groupsBody"></tbody></table>
+          <div class="section">
+            <div class="toolbar">
+              <h2>Groups</h2>
+              <button id="cancelGroupEdit" class="subtle">Cancel Edit</button>
+            </div>
+            <div class="formgrid">
+              <label class="wide">Group Name<input id="groupName" placeholder="edge-auto"></label>
+              <div class="actions"><button id="createGroup" class="primary">Save Group</button></div>
+            </div>
+            <div class="toolbar">
+              <div class="small muted">Derived members selected <span id="groupSelectedCount" class="count">0</span></div>
+              <div class="actions"><button id="selectAllDerived" class="subtle">Select All</button><button id="clearDerived" class="subtle">Clear</button></div>
+            </div>
+            <div id="groupCandidateList" class="derived-grid"></div>
+          </div>
         </div>
-        <div class="section">
-          <h2>Preview</h2>
-          <div class="formgrid">
-            <label>Format<select id="previewFormat"><option value="v2ray">V2Ray</option><option value="passwall2">PassWall2</option><option value="sing-box">sing-box</option></select></label>
-            <label>Group Filter<input id="previewGroup" placeholder="optional"></label>
-            <label>Endpoint Mode<select id="previewEndpointMode"><option value="selected">Node Selections</option><option value="ip">IP Only</option><option value="domain">Domain Only</option><option value="all">All Visible</option><option value="none">No Preferred Endpoint</option></select></label>
-            <div class="actions"><button id="runPreview" class="primary">Preview</button></div>
+        <div class="stack">
+          <div class="section">
+            <h2>Preview</h2>
+            <div class="formgrid">
+              <label>Format<select id="previewFormat"><option value="v2ray">V2Ray</option><option value="passwall2">PassWall2</option><option value="sing-box">sing-box</option></select></label>
+              <label>Group Filter<select id="previewGroup"><option value="">All generated nodes</option></select></label>
+              <label>Endpoint Mode<select id="previewEndpointMode"><option value="selected">Node Selections</option><option value="ip">IP Only</option><option value="domain">Domain Only</option><option value="all">All Visible</option><option value="none">No Preferred Endpoint</option></select></label>
+              <div class="actions"><button id="runPreview" class="primary">Preview</button></div>
+            </div>
+            <pre id="previewOutput" class="mono"></pre>
           </div>
-          <pre id="previewOutput" class="mono"></pre>
+          <div class="section">
+            <h2>Saved Groups</h2>
+            <table><thead><tr><th>Name</th><th>Members</th><th>Sample</th><th>Actions</th></tr></thead><tbody id="groupsBody"></tbody></table>
+          </div>
         </div>
       </div>
     </section>
@@ -221,7 +309,7 @@ export function renderAdminUi(env: Env): string {
 
   <script>
     const BASE_URL = ${JSON.stringify(baseUrl)};
-    const state = { overview: null, tunnels: [], nodes: [], endpoints: [], groups: [] };
+    const state = { overview: null, tunnels: [], nodes: [], endpoints: [], groups: [], generatedNodes: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
     let editingGroupId = null;
@@ -243,12 +331,8 @@ export function renderAdminUi(env: Env): string {
 
     tokenInput.value = localStorage.getItem('adminToken') || '';
 
-    function hasToken() {
-      return Boolean((localStorage.getItem('adminToken') || '').trim());
-    }
-    function authHeaders() {
-      return { Authorization: 'Bearer ' + (localStorage.getItem('adminToken') || ''), 'Content-Type': 'application/json' };
-    }
+    function hasToken() { return Boolean((localStorage.getItem('adminToken') || '').trim()); }
+    function authHeaders() { return { Authorization: 'Bearer ' + (localStorage.getItem('adminToken') || ''), 'Content-Type': 'application/json' }; }
     function setNotice(message, kind) {
       notice.textContent = message;
       notice.className = 'notice' + (kind ? ' ' + kind : '');
@@ -272,19 +356,13 @@ export function renderAdminUi(env: Env): string {
     function esc(v) {
       return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
-    function selectedValues(el) {
-      return Array.from(el.selectedOptions).map((o) => o.value).filter(Boolean);
-    }
-    function unique(values) {
-      return Array.from(new Set(values.filter(Boolean)));
-    }
+    function selectedValues(el) { return Array.from(el.selectedOptions).map((o) => o.value).filter(Boolean); }
+    function unique(values) { return Array.from(new Set(values.filter(Boolean))); }
     function statusPill(value) {
       const clean = String(value || 'unknown');
       return '<span class="status ' + esc(clean) + '">' + esc(clean) + '</span>';
     }
-    function lockedRow(cols) {
-      return '<tr><td colspan="' + cols + '" class="muted">Login required.</td></tr>';
-    }
+    function lockedRow(cols) { return '<tr><td colspan="' + cols + '" class="muted">Login required.</td></tr>'; }
     function markSelected(select, values) {
       const set = new Set(values || []);
       Array.from(select.options).forEach((option) => { option.selected = set.has(option.value); });
@@ -302,8 +380,8 @@ export function renderAdminUi(env: Env): string {
     function clearPrivateViews() {
       eventsBody.innerHTML = lockedRow(4);
       tunnelsBody.innerHTML = lockedRow(7);
-      nodesBody.innerHTML = lockedRow(7);
-      endpointsBody.innerHTML = lockedRow(7);
+      nodesBody.innerHTML = lockedRow(6);
+      endpointsBody.innerHTML = lockedRow(5);
       groupsBody.innerHTML = lockedRow(4);
       subscriptionLinks.innerHTML = '<tr><td class="muted">Login required.</td></tr>';
       previewOutput.textContent = '';
@@ -311,9 +389,11 @@ export function renderAdminUi(env: Env): string {
       state.nodes = [];
       state.endpoints = [];
       state.groups = [];
+      state.generatedNodes = [];
       renderTunnelOptions();
-      renderNodeOptions();
+      renderBindingNodeList();
       renderEndpointOptions();
+      renderGeneratedNodeOptions();
     }
     function activate(tab) {
       document.querySelectorAll('.view').forEach((el) => el.classList.toggle('hidden', el.id !== tab));
@@ -349,51 +429,85 @@ export function renderAdminUi(env: Env): string {
     async function refreshNodes() {
       const data = await api('/api/admin/proxy-nodes');
       state.nodes = data.proxyNodes || [];
-      renderNodeOptions();
+      renderBindingNodeList();
       nodesBody.innerHTML = state.nodes.map((row) => {
         const path = row.use_tunnel ? (row.tunnel_public_hostname || row.selected_tunnel_id || 'Tunnel not selected') : 'Direct';
-        const endpointCount = (row.selectedEndpointIds || []).length;
-        return '<tr><td><input class="checkbox" type="checkbox" data-node-check="' + esc(row.id) + '"></td><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointCount) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-node="' + esc(row.id) + '">Edit Source</button><button data-bind-node="' + esc(row.id) + '">Bind</button><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
-      }).join('') || '<tr><td colspan="7" class="muted">No proxy nodes.</td></tr>';
+        const endpointText = row.use_tunnel ? globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional' : 'Direct';
+        return '<tr><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-node="' + esc(row.id) + '">Edit Source</button><button data-bind-node="' + esc(row.id) + '">Edit Binding</button><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+      }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
     }
     async function refreshEndpoints() {
       const data = await api('/api/admin/preferred-endpoints');
       state.endpoints = data.preferredEndpoints || [];
       renderEndpointOptions();
       endpointsBody.innerHTML = state.endpoints.map((row) =>
-        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(row.scope === 'global' ? 'Global Pool' : 'Selected Nodes') + '</td><td>' + esc(row.default_selected ? 'Default Fallback' : 'Explicit Selection') + '</td><td>' + esc(row.scope === 'global' ? 'All nodes' : ((row.proxyNodeIds || []).length + ' nodes')) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
-      ).join('') || '<tr><td colspan="7" class="muted">No preferred endpoints.</td></tr>';
+        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(row.scope === 'global' ? 'Global Always On' : 'Binding Option') + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+      ).join('') || '<tr><td colspan="5" class="muted">No preferred endpoints.</td></tr>';
+    }
+    async function refreshGeneratedNodes() {
+      const data = await api('/api/admin/subscriptions/generated-nodes?format=v2ray&endpointMode=selected');
+      state.generatedNodes = (data.generatedNodes || []).filter((item) => !item.skipped);
+      renderGeneratedNodeOptions();
     }
     async function refreshGroups() {
       const data = await api('/api/admin/groups');
       state.groups = data.groups || [];
-      renderGroupNodeOptions();
-      groupsBody.innerHTML = state.groups.map((row) =>
-        '<tr><td>' + esc(row.name) + '</td><td>' + esc(row.endpoint_mode) + '</td><td>' + esc((row.proxyNodeIds || []).length) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
-      ).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
+      renderGroupOptions();
+      groupsBody.innerHTML = state.groups.map((row) => {
+        const ids = row.derivedNodeIds || [];
+        const sample = ids.slice(0, 3).map((id) => generatedLabel(id)).join(', ');
+        return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td class="small muted">' + esc(sample || '-') + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+      }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
     }
 
+    function globalEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope === 'global'); }
+    function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global'); }
+    function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
-      const options = '<option value="">Select tunnel</option>' + state.tunnels.map((t) =>
-        '<option value="' + esc(t.id) + '">' + esc((t.swarm_node_name || t.agent_id) + ' / ' + (t.target_url || t.public_hostname || t.tunnel_key)) + '</option>'
+      const options = '<option value="">Direct / origin server</option>' + state.tunnels.map((t) =>
+        '<option value="' + esc(t.id) + '">' + esc('Tunnel SNI: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id)) + '</option>'
       ).join('');
-      byId('bindingTunnel').innerHTML = options;
+      byId('bindingTraffic').innerHTML = options;
     }
-    function renderNodeOptions() {
-      const options = state.nodes.map((n) => '<option value="' + esc(n.id) + '">' + esc(n.name) + '</option>').join('');
-      byId('bindingNodes').innerHTML = options;
-      byId('endpointNodes').innerHTML = options;
-      byId('groupNodes').innerHTML = options;
+    function renderBindingNodeList() {
+      const selected = new Set(selectedBindingNodeIds());
+      byId('bindingNodeList').innerHTML = state.nodes.map((n) => {
+        const checked = selected.has(n.id) ? ' checked' : '';
+        const traffic = n.use_tunnel ? (n.tunnel_public_hostname || 'tunnel selected') : 'direct';
+        return '<label class="check-row"><input type="checkbox" data-binding-node="' + esc(n.id) + '"' + checked + '><span><span class="row-title"><strong>' + esc(n.name) + '</strong><span class="small muted">' + esc(n.protocol) + '</span></span><span class="row-meta">' + esc(traffic) + '</span></span></label>';
+      }).join('') || '<div class="muted small">No nodes available.</div>';
+      updateBindingSelectedCount();
     }
     function renderEndpointOptions() {
-      const options = state.endpoints.map((e) => {
-        const label = (e.label || e.value) + ' / ' + e.type + ' / ' + (e.scope === 'global' ? 'global' : 'node');
+      const options = bindingEndpoints().map((e) => {
+        const label = (e.label || e.value) + ' / ' + e.type;
         return '<option value="' + esc(e.id) + '">' + esc(label) + '</option>';
       }).join('');
       byId('bindingEndpoints').innerHTML = options;
+      const chips = globalEndpoints().map((e) => '<span class="chip">' + esc((e.label || e.value) + ' / ' + e.type) + '</span>').join('');
+      byId('globalEndpointChips').innerHTML = chips || '<span class="muted small">No global endpoints configured.</span>';
     }
-    function renderGroupNodeOptions() {
-      byId('groupNodes').innerHTML = state.nodes.map((n) => '<option value="' + esc(n.id) + '">' + esc(n.name) + '</option>').join('');
+    function renderGeneratedNodeOptions() {
+      const selected = new Set(selectedDerivedIds());
+      let html = '';
+      let lastSource = '';
+      for (const item of state.generatedNodes) {
+        if (item.sourceName !== lastSource) {
+          lastSource = item.sourceName;
+          html += '<div class="derived-source">' + esc(lastSource) + '</div>';
+        }
+        const checked = selected.has(item.id) ? ' checked' : '';
+        const endpoint = item.endpointValue ? item.endpointValue + ' / ' + item.endpointType : 'direct-or-tunnel';
+        const traffic = item.tunnelHost ? 'SNI ' + item.tunnelHost : 'origin';
+        html += '<label class="derived-row"><input type="checkbox" data-derived-id="' + esc(item.id) + '"' + checked + '><span><span class="row-title"><strong>' + esc(endpoint) + '</strong><span class="small muted">' + esc(item.protocol) + '</span></span><span class="row-meta">' + esc(traffic) + '</span></span></label>';
+      }
+      byId('groupCandidateList').innerHTML = html || '<div class="muted small">No generated nodes. Add nodes and endpoints first.</div>';
+      updateGroupSelectedCount();
+    }
+    function renderGroupOptions() {
+      const current = byId('previewGroup').value;
+      byId('previewGroup').innerHTML = '<option value="">All generated nodes</option>' + state.groups.map((g) => '<option value="' + esc(g.name) + '">' + esc(g.name) + '</option>').join('');
+      byId('previewGroup').value = current;
     }
     function renderSubscriptionLinks() {
       const base = BASE_URL || location.origin;
@@ -418,37 +532,52 @@ export function renderAdminUi(env: Env): string {
       editingEndpointId = null;
       byId('createEndpoint').textContent = 'Add Endpoints';
       byId('endpointType').value = 'ip';
-      byId('endpointScope').value = 'global';
-      byId('endpointDefault').value = 'false';
+      byId('endpointRole').value = 'global';
       byId('endpointEnabled').value = 'true';
       byId('endpointValues').value = '';
       byId('endpointLabel').value = '';
       byId('endpointSort').value = '0';
-      markSelected(byId('endpointNodes'), []);
-      updateEndpointScopeState();
     }
     function resetGroupForm() {
       editingGroupId = null;
-      byId('createGroup').textContent = 'Add Group';
+      byId('createGroup').textContent = 'Save Group';
       byId('groupName').value = '';
-      byId('groupEndpointMode').value = 'selected';
-      markSelected(byId('groupNodes'), []);
-    }
-    function updateEndpointScopeState() {
-      const nodeScoped = byId('endpointScope').value === 'node';
-      byId('endpointNodes').disabled = !nodeScoped;
-      if (!nodeScoped) markSelected(byId('endpointNodes'), []);
+      markDerivedCandidates([]);
     }
     function selectedBindingNodeIds() {
-      const checked = Array.from(document.querySelectorAll('[data-node-check]:checked')).map((input) => input.dataset.nodeCheck);
-      return unique(checked.concat(selectedValues(byId('bindingNodes'))));
+      return Array.from(document.querySelectorAll('[data-binding-node]:checked')).map((input) => input.dataset.bindingNode).filter(Boolean);
     }
+    function markBindingNodes(values) {
+      const set = new Set(values || []);
+      document.querySelectorAll('[data-binding-node]').forEach((input) => { input.checked = set.has(input.dataset.bindingNode); });
+      updateBindingSelectedCount();
+    }
+    function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
+    function selectedDerivedIds() {
+      return Array.from(document.querySelectorAll('[data-derived-id]:checked')).map((input) => input.dataset.derivedId).filter(Boolean);
+    }
+    function markDerivedCandidates(values) {
+      const set = new Set(values || []);
+      document.querySelectorAll('[data-derived-id]').forEach((input) => { input.checked = set.has(input.dataset.derivedId); });
+      updateGroupSelectedCount();
+    }
+    function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
     function loadBindingFromNode(row) {
-      markSelected(byId('bindingNodes'), [row.id]);
-      byId('bindingMode').value = row.use_tunnel ? 'tunnel' : 'direct';
-      byId('bindingTunnel').value = row.selected_tunnel_id || '';
+      markBindingNodes([row.id]);
+      byId('bindingTraffic').value = row.use_tunnel ? (row.selected_tunnel_id || '') : '';
       markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
     }
+    function generatedLabel(id) {
+      const item = state.generatedNodes.find((node) => node.id === id);
+      if (!item) return id;
+      return item.sourceName + ' / ' + (item.endpointValue || item.tunnelHost || 'direct');
+    }
+
+    document.body.addEventListener('change', (e) => {
+      const t = e.target;
+      if (t && t.dataset && t.dataset.bindingNode) updateBindingSelectedCount();
+      if (t && t.dataset && t.dataset.derivedId) updateGroupSelectedCount();
+    });
 
     document.body.addEventListener('click', async (e) => {
       const t = e.target;
@@ -482,6 +611,8 @@ export function renderAdminUi(env: Env): string {
           await api('/api/admin/proxy-nodes/' + t.dataset.deleteNode, { method: 'DELETE' });
           setNotice('Node deleted.', 'ok');
           await refreshNodes();
+          await refreshGeneratedNodes();
+          await refreshGroups();
         }
         if (t.dataset.editEndpoint) {
           const row = state.endpoints.find((item) => item.id === t.dataset.editEndpoint);
@@ -489,29 +620,27 @@ export function renderAdminUi(env: Env): string {
             editingEndpointId = row.id;
             byId('createEndpoint').textContent = 'Save Endpoint';
             byId('endpointType').value = row.type || 'ip';
-            byId('endpointScope').value = row.scope || 'global';
-            byId('endpointDefault').value = row.default_selected ? 'true' : 'false';
+            byId('endpointRole').value = row.scope || 'global';
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
             byId('endpointValues').value = row.value || '';
             byId('endpointLabel').value = row.label || '';
             byId('endpointSort').value = String(row.sort_order || 0);
-            markSelected(byId('endpointNodes'), row.proxyNodeIds || []);
-            updateEndpointScopeState();
           }
         }
         if (t.dataset.deleteEndpoint) {
           await api('/api/admin/preferred-endpoints/' + t.dataset.deleteEndpoint, { method: 'DELETE' });
           setNotice('Endpoint deleted.', 'ok');
           await refreshEndpoints();
+          await refreshGeneratedNodes();
+          await refreshGroups();
         }
         if (t.dataset.editGroup) {
           const row = state.groups.find((item) => item.id === t.dataset.editGroup);
           if (row) {
             editingGroupId = row.id;
-            byId('createGroup').textContent = 'Save Group';
+            byId('createGroup').textContent = 'Update Group';
             byId('groupName').value = row.name || '';
-            byId('groupEndpointMode').value = row.endpoint_mode || 'selected';
-            markSelected(byId('groupNodes'), row.proxyNodeIds || []);
+            markDerivedCandidates(row.derivedNodeIds || []);
           }
         }
         if (t.dataset.deleteGroup) {
@@ -536,7 +665,11 @@ export function renderAdminUi(env: Env): string {
     };
     byId('cancelNodeEdit').onclick = resetNodeSourceForm;
     byId('cancelEndpointEdit').onclick = resetEndpointForm;
-    byId('endpointScope').onchange = updateEndpointScopeState;
+    byId('cancelGroupEdit').onclick = resetGroupForm;
+    byId('selectAllBindingNodes').onclick = () => markBindingNodes(state.nodes.map((node) => node.id));
+    byId('clearBindingNodes').onclick = () => markBindingNodes([]);
+    byId('selectAllDerived').onclick = () => markDerivedCandidates(state.generatedNodes.map((node) => node.id));
+    byId('clearDerived').onclick = () => markDerivedCandidates([]);
 
     byId('saveNodeSource').onclick = async () => {
       try {
@@ -552,6 +685,7 @@ export function renderAdminUi(env: Env): string {
         resetNodeSourceForm();
         setNotice(wasEditing ? 'Node source saved.' : 'Node source added.', 'ok');
         await refreshNodes();
+        await refreshGeneratedNodes();
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -571,6 +705,7 @@ export function renderAdminUi(env: Env): string {
         byId('importContent').value = '';
         setNotice('Imported ' + data.imported + ' nodes' + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , data.imported ? 'ok' : 'warn');
         await refreshNodes();
+        await refreshGeneratedNodes();
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -578,19 +713,20 @@ export function renderAdminUi(env: Env): string {
     byId('applyBinding').onclick = async () => {
       try {
         const ids = selectedBindingNodeIds();
-        if (ids.length === 0) throw new Error('Select at least one node.');
-        const useTunnel = byId('bindingMode').value === 'tunnel';
-        if (useTunnel && !byId('bindingTunnel').value) throw new Error('Select a tunnel for tunnel traffic path.');
+        if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
+        const selectedTunnelId = byId('bindingTraffic').value || null;
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
-            useTunnel,
-            selectedTunnelId: useTunnel ? byId('bindingTunnel').value : null,
+            useTunnel: Boolean(selectedTunnelId),
+            selectedTunnelId,
             selectedEndpointIds: selectedValues(byId('bindingEndpoints'))
           })
         })));
         setNotice('Binding applied to ' + ids.length + ' node(s).', 'ok');
         await refreshNodes();
+        await refreshGeneratedNodes();
+        await refreshGroups();
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -598,14 +734,16 @@ export function renderAdminUi(env: Env): string {
     byId('clearBindingEndpoints').onclick = async () => {
       try {
         const ids = selectedBindingNodeIds();
-        if (ids.length === 0) throw new Error('Select at least one node.');
+        if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({ selectedEndpointIds: [] })
         })));
         markSelected(byId('bindingEndpoints'), []);
-        setNotice('Endpoint selections cleared for ' + ids.length + ' node(s).', 'ok');
+        setNotice('Additional endpoint selections cleared for ' + ids.length + ' node(s).', 'ok');
         await refreshNodes();
+        await refreshGeneratedNodes();
+        await refreshGroups();
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -615,14 +753,15 @@ export function renderAdminUi(env: Env): string {
         const path = editingEndpointId ? '/api/admin/preferred-endpoints/' + editingEndpointId : '/api/admin/preferred-endpoints';
         const method = editingEndpointId ? 'PATCH' : 'POST';
         const wasEditing = Boolean(editingEndpointId);
+        const role = byId('endpointRole').value;
         const body = {
           type: byId('endpointType').value,
           label: byId('endpointLabel').value,
-          scope: byId('endpointScope').value,
-          defaultSelected: byId('endpointDefault').value === 'true',
+          scope: role,
+          defaultSelected: role === 'global',
           enabled: byId('endpointEnabled').value === 'true',
           sortOrder: Number(byId('endpointSort').value || 0),
-          proxyNodeIds: byId('endpointScope').value === 'node' ? selectedValues(byId('endpointNodes')) : []
+          proxyNodeIds: []
         };
         if (editingEndpointId) body.value = byId('endpointValues').value;
         else body.values = byId('endpointValues').value;
@@ -631,19 +770,23 @@ export function renderAdminUi(env: Env): string {
         const count = data.preferredEndpoints ? data.preferredEndpoints.length : 1;
         setNotice(wasEditing ? 'Endpoint saved.' : 'Added ' + count + ' endpoint(s).', 'ok');
         await refreshEndpoints();
+        await refreshGeneratedNodes();
+        await refreshGroups();
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
     };
     byId('createGroup').onclick = async () => {
       try {
+        const ids = selectedDerivedIds();
+        if (ids.length === 0) throw new Error('Select at least one derived node for the group.');
         const path = editingGroupId ? '/api/admin/groups/' + editingGroupId : '/api/admin/groups';
         const method = editingGroupId ? 'PATCH' : 'POST';
         const wasEditing = Boolean(editingGroupId);
         await api(path, { method, body: JSON.stringify({
           name: byId('groupName').value,
-          endpointMode: byId('groupEndpointMode').value,
-          proxyNodeIds: selectedValues(byId('groupNodes'))
+          endpointMode: 'selected',
+          derivedNodeIds: ids
         }) });
         resetGroupForm();
         setNotice(wasEditing ? 'Group saved.' : 'Group added.', 'ok');
@@ -673,8 +816,12 @@ export function renderAdminUi(env: Env): string {
     };
     byId('refreshDashboard').onclick = () => hasToken() ? refreshDashboard().catch((err) => setNotice(formatError(err), 'error')) : refreshAll();
     byId('refreshTunnels').onclick = () => refreshTunnels().catch((err) => setNotice(formatError(err), 'error'));
-    byId('refreshNodes').onclick = () => refreshNodes().catch((err) => setNotice(formatError(err), 'error'));
-    byId('refreshEndpoints').onclick = () => refreshEndpoints().catch((err) => setNotice(formatError(err), 'error'));
+    byId('refreshNodes').onclick = async () => {
+      try { await refreshNodes(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
+    };
+    byId('refreshEndpoints').onclick = async () => {
+      try { await refreshEndpoints(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
+    };
 
     async function refreshAll(fromLogin) {
       try {
@@ -692,6 +839,7 @@ export function renderAdminUi(env: Env): string {
         await refreshTunnels();
         await refreshNodes();
         await refreshEndpoints();
+        await refreshGeneratedNodes();
         await refreshGroups();
         if (fromLogin) setNotice('Signed in.', 'ok');
       } catch (err) {
@@ -700,7 +848,6 @@ export function renderAdminUi(env: Env): string {
       }
     }
 
-    updateEndpointScopeState();
     refreshAll(false);
   </script>
 </body>

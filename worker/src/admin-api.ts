@@ -4,7 +4,7 @@ import { queueRestartCommand } from "./cron";
 import { parseEndpointValues, parseProxySubscriptionContent, type ParsedProxyNode } from "./importers";
 import { inferProtocol } from "./protocols";
 import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from "./settings";
-import { parseSubscriptionOptions, previewSubscription } from "./subscriptions";
+import { listGeneratedNodes, parseSubscriptionOptions, previewSubscription } from "./subscriptions";
 import type { Env, JsonRecord, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
 import {
   boolToInt,
@@ -133,6 +133,15 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
       throw new HttpError(400, "invalid subscription format");
     }
     return json(await previewSubscription(env, parseSubscriptionOptions(format as SubscriptionOptions["format"], url)));
+  }
+
+  if (request.method === "GET" && path === "/api/admin/subscriptions/generated-nodes") {
+    const format = url.searchParams.get("format") || "v2ray";
+    if (!["v2ray", "passwall2", "sing-box"].includes(format)) {
+      throw new HttpError(400, "invalid subscription format");
+    }
+    const options = parseSubscriptionOptions(format as SubscriptionOptions["format"], url);
+    return json({ generatedNodes: await listGeneratedNodes(env, { ...options, group: null }) });
   }
 
   if (request.method === "POST" && path === "/api/admin/subscriptions/rotate-token") {
@@ -482,6 +491,7 @@ async function listGroups(env: Env): Promise<unknown[]> {
   const members = await all<{ group_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM group_members");
   return groups.map((group) => ({
     ...group,
+    derivedNodeIds: derivedNodeIdsFromFilter(String(group.endpoint_filter_json || "{}")),
     proxyNodeIds: members.filter((member) => member.group_id === group.id).map((member) => member.proxy_node_id)
   }));
 }
@@ -498,7 +508,7 @@ async function createGroup(env: Env, body: JsonRecord): Promise<unknown> {
     requiredString(body.name, "name"),
     optionalString(body.remark),
     optionalString(body.endpointMode ?? body.endpoint_mode) || "selected",
-    safeJson(body.endpointFilter || body.endpoint_filter || {}),
+    groupEndpointFilterJson(body),
     boolToInt(body.enabled, true),
     intOrNull(body.sortOrder ?? body.sort_order) || 0,
     timestamp,
@@ -519,8 +529,9 @@ async function updateGroup(env: Env, id: string, body: JsonRecord): Promise<unkn
     body.remark === null ? null : optionalString(body.remark) || (current.remark as string | null),
     optionalString(body.endpointMode ?? body.endpoint_mode) || String(current.endpoint_mode),
     body.endpointFilter === undefined && body.endpoint_filter === undefined
+      && body.derivedNodeIds === undefined && body.derived_node_ids === undefined
       ? String(current.endpoint_filter_json)
-      : safeJson(body.endpointFilter || body.endpoint_filter || {}),
+      : groupEndpointFilterJson(body),
     body.enabled === undefined ? Number(current.enabled) : boolToInt(body.enabled),
     intOrNull(body.sortOrder ?? body.sort_order) ?? Number(current.sort_order),
     nowIso(),
@@ -528,6 +539,29 @@ async function updateGroup(env: Env, id: string, body: JsonRecord): Promise<unkn
   );
   await replaceGroupMembers(env, id, body);
   return await first(env.DB, "SELECT * FROM groups WHERE id = ?", id);
+}
+
+function groupEndpointFilterJson(body: JsonRecord): string {
+  const filter = body.endpointFilter || body.endpoint_filter || {};
+  const record = typeof filter === "object" && filter !== null && !Array.isArray(filter)
+    ? { ...(filter as Record<string, unknown>) }
+    : {};
+  const ids = body.derivedNodeIds ?? body.derived_node_ids;
+  if (Array.isArray(ids)) {
+    record.derivedNodeIds = ids.filter((id): id is string => typeof id === "string");
+  }
+  return safeJson(record);
+}
+
+function derivedNodeIdsFromFilter(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+    const ids = (parsed as { derivedNodeIds?: unknown }).derivedNodeIds;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 async function replaceGroupMembers(env: Env, groupId: string, body: JsonRecord): Promise<void> {
