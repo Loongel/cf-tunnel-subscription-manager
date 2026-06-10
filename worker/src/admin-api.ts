@@ -338,13 +338,16 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   const errors: string[] = [];
   const byId = new Map(activeCandidates.map((item) => [item.id, item]));
   const seenNames = new Set<string>();
+  const newIdsByName = new Map<string, string>();
   let skipped = 0;
   let created = 0;
   let updated = 0;
   let deletedOld = 0;
+  let deletedRows: Array<{ id: string; name: string }> = [];
 
   if (body.replaceExistingForRemark === true && remark) {
-    deletedOld = await deleteImportedNodesByRemark(env, remark);
+    deletedRows = await deleteImportedNodesByRemarks(env, replacementRemarks(body, remark));
+    deletedOld = deletedRows.length;
   }
 
   for (const item of activeCandidates) {
@@ -378,6 +381,8 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       }
       seenNames.add(variant.name);
       try {
+        const stableId = await stableImportedNodeId(remark || item.sourceName, variant.name);
+        newIdsByName.set(variant.name, stableId);
         const payload = {
           name: variant.name,
           remark: remark || item.sourceName,
@@ -387,7 +392,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
           enabled: body.enabled === undefined ? true : body.enabled,
           useTunnel: false,
           selectedEndpointIds: [],
-          id: await stableImportedNodeId(remark || item.sourceName, variant.name)
+          id: stableId
         };
         const result = body.replaceExistingForRemark === true && remark
           ? { row: await createProxyNode(env, payload), created: true }
@@ -402,13 +407,27 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     }
   }
 
+  if (deletedRows.length > 0 && newIdsByName.size > 0) {
+    await migrateGroupDerivedNodeIds(env, deletedRows, newIdsByName);
+  }
+
   return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
 }
 
-async function deleteImportedNodesByRemark(env: Env, remark: string): Promise<number> {
-  const rows = await all<{ id: string }>(env.DB, "SELECT id FROM proxy_nodes WHERE remark = ?", remark);
-  await run(env.DB, "DELETE FROM proxy_nodes WHERE remark = ?", remark);
-  return rows.length;
+function replacementRemarks(body: JsonRecord, remark: string): string[] {
+  return Array.from(new Set([remark, ...parseEndpointValues(body.replaceExistingRemarks)]));
+}
+
+async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<Array<{ id: string; name: string }>> {
+  if (remarks.length === 0) return [];
+  const placeholders = remarks.map(() => "?").join(", ");
+  const rows = await all<{ id: string; name: string }>(
+    env.DB,
+    `SELECT id, name FROM proxy_nodes WHERE remark IN (${placeholders})`,
+    ...remarks
+  );
+  await run(env.DB, `DELETE FROM proxy_nodes WHERE remark IN (${placeholders})`, ...remarks);
+  return rows;
 }
 
 async function stableImportedNodeId(sourceName: string, nodeName: string): Promise<string> {
@@ -416,6 +435,49 @@ async function stableImportedNodeId(sourceName: string, nodeName: string): Promi
   const digest = await crypto.subtle.digest("SHA-1", bytes);
   const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `node_${hex.slice(0, 32)}`;
+}
+
+async function migrateGroupDerivedNodeIds(
+  env: Env,
+  deletedRows: Array<{ id: string; name: string }>,
+  newIdsByName: Map<string, string>
+): Promise<void> {
+  const oldToNewId = new Map<string, string>();
+  for (const row of deletedRows) {
+    const newId = newIdsByName.get(row.name);
+    if (newId) oldToNewId.set(row.id, newId);
+  }
+  if (oldToNewId.size === 0) return;
+
+  const groups = await all<{ id: string; endpoint_filter_json: string }>(
+    env.DB,
+    "SELECT id, endpoint_filter_json FROM groups"
+  );
+  for (const group of groups) {
+    const filter = parseJsonObject(group.endpoint_filter_json);
+    if (!Array.isArray(filter.derivedNodeIds)) continue;
+    let changed = false;
+    const derivedNodeIds = filter.derivedNodeIds.map((value) => {
+      if (typeof value !== "string") return value;
+      for (const [oldId, newId] of oldToNewId) {
+        if (value.startsWith(`${oldId}:`)) {
+          changed = true;
+          return `${newId}:${value.slice(oldId.length + 1)}`;
+        }
+      }
+      return value;
+    });
+    if (changed) {
+      filter.derivedNodeIds = derivedNodeIds as JsonValue;
+      await run(
+        env.DB,
+        "UPDATE groups SET endpoint_filter_json = ?, updated_at = ? WHERE id = ?",
+        safeJson(filter),
+        nowIso(),
+        group.id
+      );
+    }
+  }
 }
 
 async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
@@ -734,7 +796,8 @@ async function refreshImportSource(env: Env, id: string, mode: "manual" | "cron"
       candidates: preview.candidates as unknown as JsonValue,
       remark: source.name,
       enabled: true,
-      replaceExistingForRemark: true
+      replaceExistingForRemark: true,
+      replaceExistingRemarks: replacementRemarksForImportSource(source) as unknown as JsonValue
     });
     await run(
       env.DB,
@@ -752,6 +815,11 @@ async function refreshImportSource(env: Env, id: string, mode: "manual" | "cron"
     if (mode === "cron") return { imported: 0, updated: 0, skipped: 0, errors: [message] };
     throw error;
   }
+}
+
+function replacementRemarksForImportSource(source: ImportSourceRow): string[] {
+  if (source.source_kind === "url") return parseEndpointValues(source.url);
+  return [];
 }
 
 function ensureFreshImportPreview(preview: { candidates: ImportCandidate[]; errors: string[] }): void {
