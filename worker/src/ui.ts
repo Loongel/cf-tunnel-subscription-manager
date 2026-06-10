@@ -796,7 +796,7 @@ export function renderAdminUi(env: Env): string {
     }
     function absoluteSubscriptionUrl(url) {
       const base = BASE_URL || location.origin;
-      if (/^https?:\/\//i.test(url)) return url;
+      if (url.toLowerCase().startsWith('http://') || url.toLowerCase().startsWith('https://')) return url;
       return base + (url.startsWith('/') ? url : '/' + url);
     }
     function renderImportReview() {
