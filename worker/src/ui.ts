@@ -114,6 +114,24 @@ export function renderAdminUi(env: Env): string {
     .brandmark { width: 26px; height: 26px; border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; color: #dbeafe; background: rgba(96, 165, 250, 0.12); font-size: 14px; }
     .tokenbar { display: grid; grid-template-columns: minmax(220px, 430px) auto auto; gap: 8px; align-items: center; }
     .notice { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; background: rgba(20, 28, 44, 0.88); color: var(--muted); min-height: 38px; }
+    .notice {
+      position: fixed;
+      top: 58px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(920px, calc(100vw - 24px));
+      z-index: 50;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+    .notice.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+    .notice button { min-height: 26px; padding: 2px 8px; border-color: transparent; background: transparent; color: var(--muted); }
     .notice.ok { color: var(--ok); border-color: rgba(52, 211, 153, 0.42); background: rgba(52, 211, 153, 0.09); }
     .notice.error { color: var(--bad); border-color: rgba(251, 113, 133, 0.42); background: rgba(251, 113, 133, 0.08); }
     .notice.warn { color: var(--warn); border-color: rgba(251, 191, 36, 0.42); background: rgba(251, 191, 36, 0.08); }
@@ -181,6 +199,10 @@ export function renderAdminUi(env: Env): string {
     .group-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .group-chip { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 8px; color: var(--accent-2); background: rgba(96, 165, 250, 0.1); font-size: 12px; max-width: 280px; }
     .group-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .link-chip-grid { display: grid; gap: 9px; }
+    .link-chip-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 10px; align-items: center; }
+    .link-chip-row strong { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .link-chips { display: flex; flex-wrap: wrap; gap: 7px; }
     .import-review { display: grid; gap: 10px; margin-top: 12px; }
     .import-list { display: grid; gap: 7px; }
     .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 310px) auto auto; gap: 8px; align-items: center; }
@@ -211,7 +233,7 @@ export function renderAdminUi(env: Env): string {
     </div>
   </header>
   <main>
-    <div id="notice" class="notice warn">Public status loaded. Login unlocks management actions.</div>
+    <div id="notice" class="notice warn show"><span id="noticeText">Public status loaded. Login unlocks management actions.</span><button id="noticeClose" aria-label="Dismiss notice">x</button></div>
     <nav id="tabs">
       <button data-tab="dashboard" class="active">Dashboard</button>
       <button data-tab="tunnels">Tunnels</button>
@@ -293,7 +315,7 @@ export function renderAdminUi(env: Env): string {
             <div class="subpanel binding-picker">
               <div class="toolbar">
                 <h3>Nodes To Update</h3>
-                <div class="actions"><button id="selectVisibleBindingNodes" class="subtle">Select Visible</button><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
+                <div class="actions"><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
               </div>
               <div class="filterbar">
                 <input id="bindingNodeFilter" placeholder="Search nodes">
@@ -394,7 +416,7 @@ export function renderAdminUi(env: Env): string {
         <div class="stack">
           <div class="section">
             <div class="toolbar"><h2>Subscription Links</h2><button id="rotateSubscriptionToken" class="danger">Rotate Token</button></div>
-            <table><tbody id="subscriptionLinks"></tbody></table>
+            <div id="subscriptionLinks" class="link-chip-grid"></div>
           </div>
           <div class="section">
             <div class="toolbar">
@@ -408,6 +430,10 @@ export function renderAdminUi(env: Env): string {
             <div class="toolbar">
               <div class="small muted">Derived members selected <span id="groupSelectedCount" class="count">0</span></div>
               <div class="actions"><button id="selectAllDerived" class="subtle">Select All</button><button id="clearDerived" class="subtle">Clear</button></div>
+            </div>
+            <div class="filterbar">
+              <input id="groupCandidateFilter" placeholder="Search derived nodes">
+              <select id="groupCandidateMode"><option value="all">All derived</option><option value="selected">Selected only</option></select>
             </div>
             <div id="groupCandidateList" class="derived-grid"></div>
           </div>
@@ -425,6 +451,10 @@ export function renderAdminUi(env: Env): string {
           </div>
           <div class="section">
             <h2>Saved Groups</h2>
+            <div class="filterbar">
+              <input id="savedGroupFilter" placeholder="Search groups or members">
+              <select id="savedGroupMode"><option value="all">All groups</option><option value="nonempty">With members</option></select>
+            </div>
             <table><thead><tr><th>Name</th><th>Members</th><th>Sample</th><th>Actions</th></tr></thead><tbody id="groupsBody"></tbody></table>
           </div>
         </div>
@@ -445,6 +475,7 @@ export function renderAdminUi(env: Env): string {
     const byId = (id) => document.getElementById(id);
     const tokenInput = byId('tokenInput');
     const notice = byId('notice');
+    const noticeText = byId('noticeText');
     const metricAgents = byId('metricAgents');
     const metricHealthy = byId('metricHealthy');
     const metricUnhealthy = byId('metricUnhealthy');
@@ -464,8 +495,9 @@ export function renderAdminUi(env: Env): string {
     function hasToken() { return Boolean((localStorage.getItem('adminToken') || '').trim()); }
     function authHeaders() { return { Authorization: 'Bearer ' + (localStorage.getItem('adminToken') || ''), 'Content-Type': 'application/json' }; }
     function setNotice(message, kind) {
-      notice.textContent = message;
+      noticeText.textContent = message;
       notice.className = 'notice' + (kind ? ' ' + kind : '');
+      notice.classList.add('show');
     }
     function formatError(err) {
       const text = String((err && err.message) || err || 'Request failed');
@@ -516,7 +548,7 @@ export function renderAdminUi(env: Env): string {
       nodesBody.innerHTML = lockedRow(6);
       endpointsBody.innerHTML = lockedRow(5);
       groupsBody.innerHTML = lockedRow(4);
-      subscriptionLinks.innerHTML = '<tr><td class="muted">Login required.</td></tr>';
+      subscriptionLinks.innerHTML = '<div class="muted small">Login required.</div>';
       previewOutput.textContent = '';
       state.tunnels = [];
       state.snis = [];
@@ -601,10 +633,8 @@ export function renderAdminUi(env: Env): string {
       const data = await api('/api/admin/groups');
       state.groups = data.groups || [];
       renderGroupOptions();
-      groupsBody.innerHTML = state.groups.map((row) => {
-        const ids = row.derivedNodeIds || [];
-        return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td>' + groupChipsHtml(ids) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
-      }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
+      renderSavedGroups();
+      renderSubscriptionLinks();
     }
     async function refreshImportSources() {
       const data = await api('/api/admin/import-sources');
@@ -704,7 +734,7 @@ export function renderAdminUi(env: Env): string {
     function renderGeneratedNodeOptions() {
       const selected = new Set(selectedDerivedIds());
       const bySource = new Map();
-      for (const item of state.generatedNodes) {
+      for (const item of filteredGeneratedNodes(selected)) {
         const rows = bySource.get(item.sourceName) || [];
         rows.push(item);
         bySource.set(item.sourceName, rows);
@@ -716,6 +746,32 @@ export function renderAdminUi(env: Env): string {
       }).join('');
       byId('groupCandidateList').innerHTML = html || '<div class="muted small">No generated nodes. Add nodes and endpoints first.</div>';
       updateGroupSelectedCount();
+    }
+    function filteredGeneratedNodes(selectedSet) {
+      const selected = selectedSet || new Set(selectedDerivedIds());
+      const query = filterText('groupCandidateFilter');
+      const mode = byId('groupCandidateMode').value;
+      return state.generatedNodes.filter((item) => {
+        const label = derivedFullLabel(item).toLowerCase();
+        const haystack = [item.sourceName, label, item.endpointValue, item.tunnelHost, item.protocol].filter(Boolean).join(' ').toLowerCase();
+        if (mode === 'selected' && !selected.has(item.id)) return false;
+        if (query && !haystack.includes(query)) return false;
+        return true;
+      });
+    }
+    function renderSavedGroups() {
+      const query = filterText('savedGroupFilter');
+      const mode = byId('savedGroupMode').value;
+      const rows = state.groups.filter((row) => {
+        const ids = row.derivedNodeIds || [];
+        if (mode === 'nonempty' && ids.length === 0) return false;
+        if (!query) return true;
+        return [row.name, ...ids.map((id) => generatedLabel(id))].join(' ').toLowerCase().includes(query);
+      });
+      groupsBody.innerHTML = rows.map((row) => {
+        const ids = row.derivedNodeIds || [];
+        return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td>' + groupChipsHtml(ids) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+      }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
     }
     function renderGroupOptions() {
       const current = byId('previewGroup').value;
@@ -730,7 +786,14 @@ export function renderAdminUi(env: Env): string {
         ['PassWall2', urls.passwall2 || base + '/sub/passwall2/'],
         ['sing-box', urls.singBox || base + '/sub/sing-box/']
       ];
-      subscriptionLinks.innerHTML = rows.map(([name, url]) => '<tr><th>' + name + '</th><td class="mono">' + esc(url) + '</td><td><button data-copy="' + esc(url) + '">Copy</button></td></tr>').join('');
+      const groups = [{ name: 'All', query: '' }, ...state.groups.map((group) => ({ name: group.name, query: '?group=' + encodeURIComponent(group.name) }))];
+      subscriptionLinks.innerHTML = rows.map(([formatName, url]) => {
+        const chips = groups.map((group) => {
+          const fullUrl = url + group.query;
+          return '<button type="button" class="select-chip" data-copy="' + esc(fullUrl) + '" title="' + esc(fullUrl) + '"><span class="chip-main">' + esc(group.name) + '</span></button>';
+        }).join('');
+        return '<div class="link-chip-row"><strong>' + esc(formatName) + '</strong><div class="link-chips">' + chips + '</div></div>';
+      }).join('');
     }
     function renderImportReview() {
       const review = byId('importReview');
@@ -925,20 +988,24 @@ export function renderAdminUi(env: Env): string {
     function generatedLabel(id) {
       const item = state.generatedNodes.find((node) => node.id === id);
       if (!item) return id;
-      return item.sourceName + ' / ' + derivedShortLabel(item);
+      return item.sourceName + ' / ' + derivedFullLabel(item);
+    }
+    function derivedFullLabel(item) {
+      const parts = [];
+      if (item.tunnelHost) parts.push('SNI ' + item.tunnelHost);
+      if (item.endpointId || item.endpointValue) parts.push(endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId);
+      if (parts.length === 0) parts.push('Direct');
+      return parts.join(' / ');
     }
     function derivedShortLabel(item) {
-      if (item.endpointId) return endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId;
-      if (item.endpointValue) return item.endpointLabel || item.endpointValue;
-      if (item.tunnelHost) return 'SNI ' + item.tunnelHost;
-      return 'Direct';
+      return derivedFullLabel(item);
     }
     function endpointLabel(id) {
       const endpoint = state.endpoints.find((item) => item.id === id);
       return endpoint ? (endpoint.label || endpoint.value) : null;
     }
     function derivedChipHtml(item, selected, index) {
-      const title = derivedShortLabel(item);
+      const title = derivedFullLabel(item);
       return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(title) + '"><span class="chip-main">' + esc(title) + '</span></button>';
     }
     function groupChipsHtml(ids) {
@@ -1159,15 +1226,19 @@ export function renderAdminUi(env: Env): string {
     byId('cancelGroupEdit').onclick = resetGroupForm;
     byId('cancelSniEdit').onclick = resetSniForm;
     byId('cancelImportSourceEdit').onclick = resetImportSourceForm;
-    byId('selectAllBindingNodes').onclick = () => markBindingNodes(state.nodes.map((node) => node.id));
-    byId('selectVisibleBindingNodes').onclick = () => markBindingNodes(unique([...selectedBindingNodeIds(), ...visibleBindingNodes().map((node) => node.id)]));
+    byId('noticeClose').onclick = () => notice.classList.remove('show');
+    byId('selectAllBindingNodes').onclick = () => markBindingNodes(unique([...selectedBindingNodeIds(), ...visibleBindingNodes().map((node) => node.id)]));
     byId('clearBindingNodes').onclick = () => markBindingNodes([]);
     byId('bindingNodeFilter').oninput = renderBindingNodeList;
     byId('bindingNodeStatus').onchange = renderBindingNodeList;
     byId('bindingTrafficFilter').oninput = renderTunnelOptions;
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
-    byId('selectAllDerived').onclick = () => markDerivedCandidates(state.generatedNodes.map((node) => node.id));
+    byId('selectAllDerived').onclick = () => markDerivedCandidates(unique([...selectedDerivedIds(), ...filteredGeneratedNodes().map((node) => node.id)]));
     byId('clearDerived').onclick = () => markDerivedCandidates([]);
+    byId('groupCandidateFilter').oninput = renderGeneratedNodeOptions;
+    byId('groupCandidateMode').onchange = renderGeneratedNodeOptions;
+    byId('savedGroupFilter').oninput = renderSavedGroups;
+    byId('savedGroupMode').onchange = renderSavedGroups;
 
     byId('saveSni').onclick = async () => {
       try {

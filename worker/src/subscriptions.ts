@@ -170,7 +170,13 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
 
     if (!node.use_tunnel) {
-      output.push(generateOne(node, null, null, null, null, effectiveOptions));
+      if (selected.length === 0) {
+        output.push(generateOne(node, null, null, null, null, effectiveOptions));
+      } else {
+        for (const endpoint of selected) {
+          output.push(generateOne(node, null, null, null, endpoint, effectiveOptions));
+        }
+      }
       continue;
     }
 

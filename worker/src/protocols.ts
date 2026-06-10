@@ -31,6 +31,10 @@ export function encodeBase64(input: string): string {
   return btoa(binary);
 }
 
+function hasEdgeOverride(ctx: MutationContext): boolean {
+  return Boolean(ctx.endpoint || ctx.tunnelHost);
+}
+
 export function decodeBase64(input: string): string {
   const normalized = input.trim().replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
@@ -48,7 +52,8 @@ function targetServer(ctx: MutationContext): string | null {
   return ctx.endpoint?.value || ctx.tunnelHost || null;
 }
 
-function targetPort(rawPort: string | null): string {
+function targetPort(rawPort: string | null, ctx: MutationContext): string {
+  if (hasEdgeOverride(ctx)) return "443";
   return rawPort && rawPort !== "" ? rawPort : "443";
 }
 
@@ -62,7 +67,7 @@ function mutateUrlUri(raw: string, ctx: MutationContext): string {
   if (!server) return raw;
   const host = tunnelHost(ctx) || server;
   url.hostname = server;
-  url.port = targetPort(url.port);
+  url.port = targetPort(url.port, ctx);
   url.hash = `#${encodeURIComponent(displayName(ctx.node, ctx.endpoint))}`;
   if (ctx.node.use_tunnel && ctx.tunnelHost) {
     const keys = ["sni", "peer"];
@@ -87,7 +92,7 @@ function mutateVmess(raw: string, ctx: MutationContext): string {
   if (!server) return raw;
   const host = tunnelHost(ctx) || server;
   parsed.add = server;
-  parsed.port = String(parsed.port || "443");
+  parsed.port = targetPort(typeof parsed.port === "string" || typeof parsed.port === "number" ? String(parsed.port) : null, ctx);
   parsed.ps = displayName(ctx.node, ctx.endpoint);
   if (ctx.node.use_tunnel && ctx.tunnelHost) {
     parsed.sni = host;
@@ -107,13 +112,13 @@ function parseShadowsocks(raw: string, ctx: MutationContext): string {
     const server = targetServer(ctx);
     if (!details || !server) return raw;
     const credential = encodeBase64(`${details.method}:${details.password}`);
-    return `ss://${credential}@${server}:${details.serverPort}${query}${label}`;
+    return `ss://${credential}@${server}:${targetPort(String(details.serverPort), ctx)}${query}${label}`;
   }
   const url = new URL(body);
   const server = targetServer(ctx);
   if (!server) return raw;
   url.hostname = server;
-  url.port = targetPort(url.port);
+  url.port = targetPort(url.port, ctx);
   const params = url.searchParams;
   if (ctx.node.use_tunnel && ctx.tunnelHost && params.has("plugin")) {
     const plugin = params.get("plugin") || "";
@@ -211,7 +216,10 @@ function mutateOutboundObject(raw: JsonRecord, ctx: MutationContext): JsonRecord
   const server = targetServer(ctx);
   if (!server) return output;
   output.server = server;
-  if (!output.server_port) output.server_port = 443;
+  output.server_port = Number(targetPort(
+    typeof output.server_port === "string" || typeof output.server_port === "number" ? String(output.server_port) : null,
+    ctx
+  ));
   output.tag = displayName(ctx.node, ctx.endpoint);
   if (ctx.node.use_tunnel && ctx.tunnelHost) {
     const tls = typeof output.tls === "object" && output.tls !== null && !Array.isArray(output.tls)
@@ -271,7 +279,7 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
         type: protocol,
         tag,
         server,
-        server_port: Number(url.port || "443"),
+        server_port: Number(targetPort(url.port, ctx)),
         tls: { enabled: true, server_name: ctx.tunnelHost || server }
       };
       if (protocol === "vless") {
@@ -297,7 +305,7 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
           type: "vmess",
           tag,
           server,
-          server_port: Number(vmess.port || 443),
+          server_port: Number(targetPort(typeof vmess.port === "string" || typeof vmess.port === "number" ? String(vmess.port) : null, ctx)),
           uuid: typeof vmess.id === "string" ? vmess.id : "",
           security: typeof vmess.scy === "string" ? vmess.scy : "auto",
           tls: { enabled: true, server_name: ctx.tunnelHost || server }
@@ -313,7 +321,7 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
           type: "shadowsocks",
           tag,
           server,
-          server_port: details.serverPort,
+          server_port: Number(targetPort(String(details.serverPort), ctx)),
           method: details.method,
           password: details.password
         }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { composeFallbackRawConfig, parseEndpointValues, parseProxySubscriptionContent } from "../src/importers";
-import { encodeBase64, mutateShareUri } from "../src/protocols";
+import { encodeBase64, mutateShareUri, toSingBoxOutbound } from "../src/protocols";
 import { subscriptionUrls } from "../src/settings";
 import type { PreferredEndpointRow, ProxyNodeRow } from "../src/types";
 
@@ -49,6 +49,20 @@ describe("protocol adapter", () => {
     expect(parsed.searchParams.get("host")).toBe("abc.trycloudflare.com");
   });
 
+  it("forces endpoint-derived VLESS output to port 443 without tunnel binding", () => {
+    const raw = "vless://uuid@example.com:1443?type=ws&security=tls&sni=edge.example.com&host=edge.example.com&path=%2F#old";
+    const result = mutateShareUri(raw, {
+      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      endpoint,
+      format: "v2ray"
+    });
+    expect(result.skipped).toBeFalsy();
+    const parsed = new URL(result.uri || "");
+    expect(parsed.hostname).toBe("162.159.1.1");
+    expect(parsed.port).toBe("443");
+    expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
+  });
+
   it("mutates VMess host fields", () => {
     const vmess = {
       v: "2",
@@ -72,6 +86,27 @@ describe("protocol adapter", () => {
     });
     expect(result.skipped).toBeFalsy();
     expect(result.uri).toMatch(/^vmess:\/\//);
+    const parsed = JSON.parse(atob((result.uri || "").replace(/^vmess:\/\//, "")));
+    expect(parsed.port).toBe("443");
+  });
+
+  it("forces endpoint-derived sing-box output to port 443", () => {
+    const raw = JSON.stringify({
+      type: "vless",
+      tag: "old",
+      server: "example.com",
+      server_port: 1443,
+      uuid: "uuid",
+      tls: { enabled: true, server_name: "edge.example.com" }
+    });
+    const result = toSingBoxOutbound(raw, {
+      node: { ...node(raw), source_type: "sing_box_outbound", protocol: "sing-box", use_tunnel: 0, selected_tunnel_id: null },
+      endpoint,
+      format: "sing-box"
+    });
+    expect(result.skipped).toBeFalsy();
+    expect(result.outbound?.server).toBe("162.159.1.1");
+    expect(result.outbound?.server_port).toBe(443);
   });
 
   it("mutates Shadowsocks SIP002 endpoint", () => {
