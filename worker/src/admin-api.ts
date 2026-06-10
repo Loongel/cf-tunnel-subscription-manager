@@ -499,21 +499,29 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
 }
 
 function importRulesFromBody(body: JsonRecord): JsonRecord {
-  const rules = isRecord(body.rules) ? { ...body.rules } as JsonRecord : {};
-  const excludeKeywords = parseEndpointValues(body.excludeKeywords);
-  const includeKeywords = parseEndpointValues(body.includeKeywords);
+  const inputRules = isRecord(body.rules) ? body.rules as JsonRecord : {};
+  const rules: JsonRecord = {};
+  const excludeKeywords = parseEndpointValues(body.excludeKeywords ?? inputRules.excludeKeywords);
+  const includeKeywords = parseEndpointValues(body.includeKeywords ?? inputRules.includeKeywords);
   if (excludeKeywords.length > 0) rules.excludeKeywords = excludeKeywords;
   if (includeKeywords.length > 0) rules.includeKeywords = includeKeywords;
-  if (Array.isArray(body.removedNames)) {
-    rules.removedNames = stringArray(body.removedNames);
+  const removedNames = body.removedNames ?? inputRules.removedNames;
+  if (Array.isArray(removedNames)) {
+    rules.removedNames = stringArray(removedNames);
   }
-  if (isRecord(body.parentNamesByName)) {
-    rules.parentNamesByName = body.parentNamesByName;
+  const parentNamesByName = body.parentNamesByName ?? inputRules.parentNamesByName;
+  if (isRecord(parentNamesByName)) {
+    rules.parentNamesByName = parentNamesByName;
   }
-  if (Array.isArray(body.carrierNames)) {
-    rules.carrierNames = stringArray(body.carrierNames);
+  const carrierNames = body.carrierNames ?? inputRules.carrierNames;
+  if (Array.isArray(carrierNames)) {
+    rules.carrierNames = stringArray(carrierNames);
   }
   return rules;
+}
+
+function currentImportRules(rules: JsonRecord): JsonRecord {
+  return importRulesFromBody({ rules });
 }
 
 function stringArray(value: unknown): string[] {
@@ -601,7 +609,7 @@ async function listImportSources(env: Env): Promise<unknown[]> {
   const rows = await all<ImportSourceRow>(env.DB, "SELECT * FROM import_sources ORDER BY updated_at DESC, name");
   return rows.map((row) => ({
     ...row,
-    rules: parseJsonObject(row.rules_json)
+    rules: currentImportRules(parseJsonObject(row.rules_json))
   }));
 }
 
