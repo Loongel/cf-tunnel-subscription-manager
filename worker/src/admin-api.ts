@@ -607,10 +607,14 @@ async function updateCustomSni(env: Env, id: string, body: JsonRecord): Promise<
 
 async function listImportSources(env: Env): Promise<unknown[]> {
   const rows = await all<ImportSourceRow>(env.DB, "SELECT * FROM import_sources ORDER BY updated_at DESC, name");
-  return rows.map((row) => ({
-    ...row,
-    rules: currentImportRules(parseJsonObject(row.rules_json))
-  }));
+  return rows.map((row) => {
+    const rules = currentImportRules(parseJsonObject(row.rules_json));
+    return {
+      ...row,
+      rules_json: safeJson(rules),
+      rules
+    };
+  });
 }
 
 async function createImportSource(env: Env, body: JsonRecord): Promise<ImportSourceRow | null> {
@@ -675,7 +679,7 @@ async function previewImportSource(env: Env, id: string): Promise<{ candidates: 
   const source = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
   if (!source) throw new HttpError(404, "import source not found");
   const built = await buildImportCandidates(env, importSourceBody(source));
-  return { ...built, candidates: applyImportRules(built.candidates, parseJsonObject(source.rules_json)) };
+  return { ...built, candidates: applyImportRules(built.candidates, currentImportRules(parseJsonObject(source.rules_json))) };
 }
 
 async function refreshImportSource(env: Env, id: string): Promise<unknown> {
@@ -690,7 +694,8 @@ async function refreshImportSource(env: Env, id: string): Promise<unknown> {
     });
     await run(
       env.DB,
-      "UPDATE import_sources SET last_fetched_at = ?, last_imported_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+      "UPDATE import_sources SET rules_json = ?, last_fetched_at = ?, last_imported_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+      safeJson(currentImportRules(parseJsonObject(source.rules_json))),
       nowIso(),
       nowIso(),
       nowIso(),
