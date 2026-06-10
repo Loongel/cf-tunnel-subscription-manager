@@ -130,8 +130,25 @@ export function renderAdminUi(env: Env): string {
     .formgrid .wide { grid-column: span 2; }
     .formgrid .full { grid-column: 1 / -1; }
     .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 0.85fr); gap: 12px; align-items: start; }
+    .node-layout { grid-template-columns: 1fr; }
     .stack { display: grid; gap: 12px; }
-    .binding-grid { display: grid; grid-template-columns: minmax(260px, 0.95fr) minmax(320px, 1.05fr); gap: 12px; align-items: stretch; }
+    .binding-grid { display: grid; grid-template-columns: minmax(360px, 1.12fr) minmax(360px, 0.88fr); gap: 12px; align-items: stretch; }
+    .binding-picker, .binding-editor { min-height: 390px; }
+    .filterbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, auto); gap: 8px; align-items: center; margin-bottom: 8px; }
+    .binding-node-select { display: none; }
+    .binding-list { display: grid; gap: 7px; max-height: clamp(300px, 42vh, 620px); overflow: auto; padding-right: 3px; }
+    .binding-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 8px; cursor: pointer; }
+    .binding-row:hover { border-color: var(--accent); }
+    .binding-row.selected { border-color: #fb923c; background: var(--selected-soft); box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.25) inset; }
+    .binding-row input { width: 16px; min-height: 16px; }
+    .binding-row-main { min-width: 0; }
+    .binding-row-main strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .binding-row-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .binding-row-badges { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+    .mini-badge { border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 11px; padding: 2px 7px; background: #121b2a; white-space: nowrap; }
+    .mini-badge.active { color: var(--accent-2); border-color: rgba(96, 165, 250, 0.48); background: rgba(96, 165, 250, 0.1); }
+    .binding-field { display: grid; gap: 8px; }
+    .binding-field select[multiple] { min-height: clamp(170px, 24vh, 320px); }
     .hidden { display: none; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
     .muted { color: var(--muted); }
@@ -250,7 +267,7 @@ export function renderAdminUi(env: Env): string {
         <button data-node-panel="importManagePanel">Subscription Imports</button>
       </div>
       <div id="nodeManagePanel" class="node-panel">
-      <div class="split">
+      <div class="split node-layout">
         <div class="stack">
           <div class="section">
             <div class="toolbar">
@@ -270,19 +287,32 @@ export function renderAdminUi(env: Env): string {
         <div class="section">
           <div class="toolbar">
             <h2>Traffic Binding</h2>
-            <div class="small muted">Selected <span id="bindingSelectedCount" class="count">0</span></div>
+            <div class="small muted"><span id="bindingSelectedCount" class="count">0</span> selected / <span id="bindingVisibleCount" class="count">0</span> visible</div>
           </div>
           <div class="binding-grid">
-            <div class="subpanel">
+            <div class="subpanel binding-picker">
               <div class="toolbar">
                 <h3>Nodes To Update</h3>
-                <div class="actions"><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
+                <div class="actions"><button id="selectVisibleBindingNodes" class="subtle">Select Visible</button><button id="selectAllBindingNodes" class="subtle">Select All</button><button id="clearBindingNodes" class="subtle">Clear</button></div>
               </div>
-              <select id="bindingNodes" multiple></select>
+              <div class="filterbar">
+                <input id="bindingNodeFilter" placeholder="Search nodes">
+                <select id="bindingNodeStatus"><option value="all">All nodes</option><option value="enabled">Enabled</option><option value="direct">Direct</option><option value="traffic">With traffic</option></select>
+              </div>
+              <select id="bindingNodes" class="binding-node-select" multiple></select>
+              <div id="bindingNodeList" class="binding-list"></div>
             </div>
-            <div class="subpanel stack">
-              <label>Tunnel / SNI<select id="bindingTraffic" multiple></select></label>
-              <label>Additional Endpoints<select id="bindingEndpoints" multiple></select></label>
+            <div class="subpanel stack binding-editor">
+              <div class="binding-field">
+                <div class="toolbar"><h3>Traffic / SNI</h3></div>
+                <input id="bindingTrafficFilter" placeholder="Search traffic or SNI">
+                <select id="bindingTraffic" multiple></select>
+              </div>
+              <div class="binding-field">
+                <div class="toolbar"><h3>Additional Endpoints</h3></div>
+                <input id="bindingEndpointFilter" placeholder="Search endpoints">
+                <select id="bindingEndpoints" multiple></select>
+              </div>
               <div class="actions">
                 <button id="applyBinding" class="primary">Apply To Selected Nodes</button>
                 <button id="clearBindingEndpoints" class="subtle">Clear Additional Endpoints</button>
@@ -595,33 +625,81 @@ export function renderAdminUi(env: Env): string {
     function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global'); }
     function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
-      const tunnelOptions = state.tunnels.map((t) =>
-        '<option value="tunnel:' + esc(t.id) + '">' + esc('Tunnel: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id)) + '</option>'
-      ).join('');
-      const sniOptions = state.snis.filter((s) => s.enabled).map((s) =>
-        '<option value="sni:' + esc(s.id) + '">' + esc('SNI: ' + (s.name || s.hostname) + ' / ' + s.hostname) + '</option>'
-      ).join('');
+      const selected = new Set(selectedValues(byId('bindingTraffic')));
+      const query = filterText('bindingTrafficFilter');
+      const tunnelOptions = state.tunnels.map((t) => {
+        const value = 'tunnel:' + t.id;
+        const label = 'Tunnel: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id);
+        if (query && !selected.has(value) && !label.toLowerCase().includes(query)) return '';
+        return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
+      }).join('');
+      const sniOptions = state.snis.filter((s) => s.enabled).map((s) => {
+        const value = 'sni:' + s.id;
+        const label = 'SNI: ' + (s.name || s.hostname) + ' / ' + s.hostname;
+        if (query && !selected.has(value) && !label.toLowerCase().includes(query)) return '';
+        return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
+      }).join('');
       const options = tunnelOptions + sniOptions;
       byId('bindingTraffic').innerHTML = options;
+      markSelected(byId('bindingTraffic'), Array.from(selected));
     }
     function renderBindingNodeList() {
-      const selected = selectedBindingNodeIds();
+      const selected = new Set(selectedBindingNodeIds().filter((id) => state.nodes.some((node) => node.id === id)));
       byId('bindingNodes').innerHTML = state.nodes.map((n) => {
         const traffic = n.use_tunnel ? 'tunnel' : 'direct';
         return '<option value="' + esc(n.id) + '">' + esc(n.name + ' / ' + n.protocol + ' / ' + traffic) + '</option>';
       }).join('');
-      markSelected(byId('bindingNodes'), selected);
+      markSelected(byId('bindingNodes'), Array.from(selected));
+      const visible = visibleBindingNodes();
+      byId('bindingVisibleCount').textContent = String(visible.length);
+      byId('bindingNodeList').innerHTML = visible.map((n) => bindingNodeRowHtml(n, selected.has(n.id))).join('') || '<div class="muted small">No matching nodes.</div>';
       updateBindingSelectedCount();
     }
+    function bindingNodeRowHtml(node, selected) {
+      const trafficIds = node.selectedTrafficIds || [
+        ...(node.selectedTunnelIds || (node.selected_tunnel_id ? [node.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
+        ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
+      ];
+      const traffic = node.use_tunnel && trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
+      const endpoints = node.use_tunnel ? globalEndpointCount() + '+' + ((node.selectedEndpointIds || []).length) : 'direct';
+      return '<label class="binding-row' + (selected ? ' selected' : '') + '">' +
+        '<input type="checkbox" data-binding-node-id="' + esc(node.id) + '"' + (selected ? ' checked' : '') + '>' +
+        '<span class="binding-row-main"><strong>' + esc(node.name) + '</strong><span>' + esc(node.remark || node.protocol || '') + '</span></span>' +
+        '<span class="binding-row-badges"><span class="mini-badge' + (node.enabled ? ' active' : '') + '">' + esc(node.enabled ? 'enabled' : 'disabled') + '</span><span class="mini-badge">' + esc(traffic) + '</span><span class="mini-badge">' + esc(endpoints) + '</span></span>' +
+      '</label>';
+    }
+    function visibleBindingNodes() {
+      const query = filterText('bindingNodeFilter');
+      const mode = byId('bindingNodeStatus').value;
+      return state.nodes.filter((node) => {
+        const trafficIds = node.selectedTrafficIds || [
+          ...(node.selectedTunnelIds || (node.selected_tunnel_id ? [node.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
+          ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
+        ];
+        if (mode === 'enabled' && !node.enabled) return false;
+        if (mode === 'direct' && node.use_tunnel && trafficIds.length > 0) return false;
+        if (mode === 'traffic' && (!node.use_tunnel || trafficIds.length === 0)) return false;
+        if (!query) return true;
+        return [node.name, node.remark, node.protocol].filter(Boolean).join(' ').toLowerCase().includes(query);
+      });
+    }
     function renderEndpointOptions() {
+      const selected = new Set(selectedAdditionalEndpointIds());
+      const query = filterText('bindingEndpointFilter');
       const globals = globalEndpoints().map((e) =>
         '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
       ).join('');
       const options = bindingEndpoints().map((e) => {
         const label = (e.label || e.value) + ' / ' + e.type;
+        if (query && !selected.has(e.id) && !label.toLowerCase().includes(query)) return '';
         return '<option value="' + esc(e.id) + '">' + esc(label) + '</option>';
       }).join('');
       byId('bindingEndpoints').innerHTML = globals + options;
+      markSelected(byId('bindingEndpoints'), Array.from(selected));
+    }
+    function filterText(id) {
+      const el = byId(id);
+      return el ? el.value.trim().toLowerCase() : '';
     }
     function renderGeneratedNodeOptions() {
       const selected = new Set(selectedDerivedIds());
@@ -804,7 +882,13 @@ export function renderAdminUi(env: Env): string {
       return selectedValues(byId('bindingNodes'));
     }
     function markBindingNodes(values) {
-      markSelected(byId('bindingNodes'), values || []);
+      const set = new Set(values || []);
+      markSelected(byId('bindingNodes'), Array.from(set));
+      document.querySelectorAll('[data-binding-node-id]').forEach((input) => {
+        input.checked = set.has(input.dataset.bindingNodeId);
+        const row = input.closest ? input.closest('.binding-row') : null;
+        if (row) row.classList.toggle('selected', input.checked);
+      });
       updateBindingSelectedCount();
     }
     function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
@@ -818,6 +902,9 @@ export function renderAdminUi(env: Env): string {
     }
     function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
     function loadBindingFromNode(row) {
+      byId('bindingNodeFilter').value = '';
+      byId('bindingNodeStatus').value = 'all';
+      renderBindingNodeList();
       markBindingNodes([row.id]);
       const traffic = row.selectedTrafficIds || [
         ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
@@ -862,6 +949,12 @@ export function renderAdminUi(env: Env): string {
     document.body.addEventListener('change', (e) => {
       const t = e.target;
       if (t && t.id === 'bindingNodes') updateBindingSelectedCount();
+      if (t && t.dataset && t.dataset.bindingNodeId) {
+        const selected = new Set(selectedBindingNodeIds());
+        if (t.checked) selected.add(t.dataset.bindingNodeId);
+        else selected.delete(t.dataset.bindingNodeId);
+        markBindingNodes(Array.from(selected));
+      }
       if (t && t.dataset && t.dataset.importParent) {
         const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.importParent);
         if (item) {
@@ -1067,7 +1160,12 @@ export function renderAdminUi(env: Env): string {
     byId('cancelSniEdit').onclick = resetSniForm;
     byId('cancelImportSourceEdit').onclick = resetImportSourceForm;
     byId('selectAllBindingNodes').onclick = () => markBindingNodes(state.nodes.map((node) => node.id));
+    byId('selectVisibleBindingNodes').onclick = () => markBindingNodes(unique([...selectedBindingNodeIds(), ...visibleBindingNodes().map((node) => node.id)]));
     byId('clearBindingNodes').onclick = () => markBindingNodes([]);
+    byId('bindingNodeFilter').oninput = renderBindingNodeList;
+    byId('bindingNodeStatus').onchange = renderBindingNodeList;
+    byId('bindingTrafficFilter').oninput = renderTunnelOptions;
+    byId('bindingEndpointFilter').oninput = renderEndpointOptions;
     byId('selectAllDerived').onclick = () => markDerivedCandidates(state.generatedNodes.map((node) => node.id));
     byId('clearDerived').onclick = () => markDerivedCandidates([]);
 
