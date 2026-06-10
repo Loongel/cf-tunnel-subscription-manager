@@ -166,7 +166,7 @@ export function renderAdminUi(env: Env): string {
     .group-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .import-review { display: grid; gap: 10px; margin-top: 12px; }
     .import-list { display: grid; gap: 7px; }
-    .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 250px) auto; gap: 8px; align-items: center; }
+    .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 310px) auto auto; gap: 8px; align-items: center; }
     .import-row.child { padding-left: 28px; border-left: 2px solid var(--selected); }
     .import-node { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 9px; }
     .import-node.carrier { border-color: #fb923c; background: var(--selected-soft); }
@@ -174,6 +174,7 @@ export function renderAdminUi(env: Env): string {
     .import-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .import-node .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .import-node .dup { color: var(--warn); font-size: 12px; white-space: nowrap; }
+    .tls-controls { display: grid; gap: 6px; }
     @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
       .tokenbar, .metrics, .formgrid, .split, .binding-grid, .import-row { grid-template-columns: 1fr; }
@@ -301,7 +302,7 @@ export function renderAdminUi(env: Env): string {
           <div class="formgrid">
             <label>Name<input id="importSourceName" placeholder="airport-a"></label>
             <label>Type<select id="importSourceKind"><option value="url">URL</option><option value="content">Pasted Content</option></select></label>
-            <label class="wide">Subscription URL<input id="importSourceUrl" placeholder="https://example.com/sub.txt"></label>
+            <label class="wide">Subscription URLs<textarea id="importSourceUrl" placeholder="https://example.com/sub-a.txt&#10;https://example.com/sub-b.txt"></textarea></label>
             <label class="wide">Paste Content<textarea id="importSourceContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
             <label>Name Prefix<input id="importPrefix" placeholder="optional"></label>
             <label>Enabled<select id="importSourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
@@ -583,7 +584,7 @@ export function renderAdminUi(env: Env): string {
         const exclude = (rules.excludeKeywords || []).join(', ');
         const include = (rules.includeKeywords || []).join(', ');
         const removed = (rules.removedNames || []).length || 0;
-        const parentCount = Object.keys(rules.parentByName || {}).length;
+        const parentCount = Object.keys(rules.parentNamesByName || {}).length;
         const source = row.source_kind === 'url' ? row.url : 'pasted content';
         const ruleText = [include ? 'include: ' + include : '', exclude ? 'exclude: ' + exclude : '', removed ? removed + ' unused' : '', parentCount ? parentCount + ' fallback links' : ''].filter(Boolean).join(' / ') || '-';
         return '<tr><td>' + esc(row.name) + '<br>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="mono">' + esc(source || '') + '</td><td>' + esc(ruleText) + '</td><td>' + esc(row.last_imported_at || row.last_error || '-') + '</td><td class="row-actions"><button data-edit-import-source="' + esc(row.id) + '">Edit</button><button data-preview-import-source="' + esc(row.id) + '">Preview</button><button data-refresh-import-source="' + esc(row.id) + '">Refresh</button><button data-delete-import-source="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
@@ -667,33 +668,42 @@ export function renderAdminUi(env: Env): string {
       const activeIds = new Set(active.map((item) => item.id));
       const childrenByParent = new Map();
       active.forEach((item) => {
-        if (item.parentId && activeIds.has(item.parentId)) {
-          const children = childrenByParent.get(item.parentId) || [];
+        const parents = parentIdsForItem(item).filter((id) => activeIds.has(id));
+        if (parents.length > 0) {
+          const children = childrenByParent.get(parents[0]) || [];
           children.push(item);
-          childrenByParent.set(item.parentId, children);
+          childrenByParent.set(parents[0], children);
         }
       });
       const output = [];
       active.forEach((item) => {
-        if (item.parentId && activeIds.has(item.parentId)) return;
+        if (parentIdsForItem(item).some((id) => activeIds.has(id))) return;
         output.push(item);
         (childrenByParent.get(item.id) || []).forEach((child) => output.push(child));
       });
       return output;
     }
     function importRowHtml(item, active) {
-      const carriers = active.filter((candidate) => candidate.tls && candidate.id !== item.id);
-      const hasParent = Boolean(item.parentId && carriers.some((candidate) => candidate.id === item.parentId));
-      const parentOptions = '<option value="">No TLS carrier</option>' + carriers.map((candidate) =>
-        '<option value="' + esc(candidate.id) + '"' + (candidate.id === item.parentId ? ' selected' : '') + '>' + esc(candidate.name) + '</option>'
-      ).join('');
+      const carriers = active.filter((candidate) => candidate.asTlsCarrier && candidate.id !== item.id);
+      const selectedParents = parentIdsForItem(item).filter((id) => carriers.some((candidate) => candidate.id === id));
+      const shownParents = item.asTlsCarrier ? ['__carrier'] : selectedParents.length > 0 ? selectedParents : [''];
+      const hasParent = selectedParents.length > 0;
+      const tlsControls = shownParents.map((selectedId, index) => {
+        const parentOptions = '<option value="">No TLS carrier</option><option value="__carrier"' + (selectedId === '__carrier' ? ' selected' : '') + '>As TLS carrier</option>' + carriers.map((candidate) =>
+          '<option value="' + esc(candidate.id) + '"' + (candidate.id === selectedId ? ' selected' : '') + '>' + esc(candidate.name) + '</option>'
+        ).join('');
+        return '<select data-import-parent="' + esc(item.id) + '" data-import-parent-index="' + String(index) + '">' + parentOptions + '</select>';
+      }).join('');
+      const canAddTls = !item.asTlsCarrier && carriers.length > selectedParents.length;
       const meta = [item.protocol, item.transport, item.server ? item.server + (item.port ? ':' + item.port : '') : null].filter(Boolean).join(' / ');
       return '<div class="import-row' + (hasParent ? ' child' : '') + '">' +
-        '<div class="import-node' + (item.tls ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
+        '<div class="import-node' + (item.asTlsCarrier ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
           '<strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span>' +
+          (item.asTlsCarrier ? '<span class="dup">TLS carrier</span>' : '') +
           (item.duplicate ? '<span class="dup">will update existing</span>' : '') +
         '</div>' +
-        '<select data-import-parent="' + esc(item.id) + '">' + parentOptions + '</select>' +
+        '<div class="tls-controls">' + tlsControls + '</div>' +
+        (canAddTls ? '<button data-add-import-tls="' + esc(item.id) + '" class="subtle">+TLS</button>' : '<span></span>') +
         '<button data-remove-import="' + esc(item.id) + '" class="subtle">Remove</button>' +
       '</div>';
     }
@@ -709,23 +719,38 @@ export function renderAdminUi(env: Env): string {
     }
     function activeImportCandidatesForCommit() {
       const activeIds = new Set(state.importCandidates.filter((item) => !item.removed).map((item) => item.id));
+      const carrierIds = new Set(state.importCandidates.filter((item) => !item.removed && item.asTlsCarrier).map((item) => item.id));
       return state.importCandidates
         .filter((item) => !item.removed)
-        .map((item) => ({ ...item, parentId: activeIds.has(item.parentId) ? item.parentId : '' }));
+        .map((item) => {
+          const parentIds = parentIdsForItem(item).filter((id) => activeIds.has(id) && carrierIds.has(id));
+          return { ...item, parentIds };
+        });
+    }
+    function parentIdsForItem(item) {
+      if (Array.isArray(item.parentIds)) return item.parentIds.filter(Boolean);
+      return [];
     }
     function importRulesFromReview() {
       const candidateById = new Map(state.importCandidates.map((item) => [item.id, item]));
-      const parentByName = {};
+      const parentNamesByName = {};
+      const carrierNames = [];
       state.importCandidates.forEach((item) => {
-        if (!item.removed && item.parentId && candidateById.get(item.parentId)) {
-          parentByName[item.name] = candidateById.get(item.parentId).name;
+        if (!item.removed && item.asTlsCarrier) carrierNames.push(item.name);
+        const names = parentIdsForItem(item)
+          .map((id) => candidateById.get(id))
+          .filter((parent) => parent && parent.asTlsCarrier && !item.removed && !parent.removed)
+          .map((parent) => parent.name);
+        if (names.length > 0) {
+          parentNamesByName[item.name] = Array.from(new Set(names));
         }
       });
       return {
         excludeKeywords: byId('importExcludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
         includeKeywords: byId('importIncludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
         removedNames: state.importCandidates.filter((item) => item.removed).map((item) => item.name),
-        parentByName
+        carrierNames,
+        parentNamesByName
       };
     }
 
@@ -847,7 +872,18 @@ export function renderAdminUi(env: Env): string {
       if (t && t.dataset && t.dataset.importParent) {
         const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.importParent);
         if (item) {
-          item.parentId = t.value || '';
+          const index = Number(t.dataset.importParentIndex || 0);
+          if (t.value === '__carrier') {
+            item.asTlsCarrier = true;
+            item.parentIds = [];
+            renderImportReview();
+            return;
+          }
+          item.asTlsCarrier = false;
+          const parentIds = parentIdsForItem(item);
+          if (t.value) parentIds[index] = t.value;
+          else parentIds.splice(index, 1);
+          item.parentIds = Array.from(new Set(parentIds.filter(Boolean)));
           renderImportReview();
         }
       }
@@ -880,9 +916,24 @@ export function renderAdminUi(env: Env): string {
           if (item) {
             item.removed = true;
             state.importCandidates.forEach((candidate) => {
-              if (candidate.parentId === item.id) candidate.parentId = '';
+              if (Array.isArray(candidate.parentIds)) {
+                candidate.parentIds = candidate.parentIds.filter((id) => id !== item.id);
+              }
             });
             renderImportReview();
+          }
+        }
+        if (t.dataset.addImportTls) {
+          const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.addImportTls);
+          if (item) {
+            const active = state.importCandidates.filter((candidate) => !candidate.removed);
+            const carriers = active.filter((candidate) => candidate.asTlsCarrier && candidate.id !== item.id);
+            const current = new Set(parentIdsForItem(item));
+            const next = carriers.find((candidate) => !current.has(candidate.id));
+            if (next) {
+              item.parentIds = [...current, next.id];
+              renderImportReview();
+            }
           }
         }
         if (t.dataset.restoreImport) {
@@ -1107,7 +1158,10 @@ export function renderAdminUi(env: Env): string {
             })
           });
         }
-        state.importCandidates = (data.candidates || []).map((item) => ({ ...item, removed: Boolean(item.removed), parentId: item.parentId || '' }));
+        state.importCandidates = (data.candidates || []).map((item) => {
+          const parentIds = Array.isArray(item.parentIds) ? item.parentIds.filter(Boolean) : [];
+          return { ...item, removed: Boolean(item.removed), asTlsCarrier: Boolean(item.asTlsCarrier), parentIds };
+        });
         renderImportReview();
         setNotice('Preview loaded ' + state.importCandidates.length + ' candidate node(s)' + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , state.importCandidates.length ? 'ok' : 'warn');
       } catch (err) {
@@ -1126,7 +1180,9 @@ export function renderAdminUi(env: Env): string {
         item.removed = include ? !matched : matched;
         if (item.removed) {
           state.importCandidates.forEach((candidate) => {
-            if (candidate.parentId === item.id) candidate.parentId = '';
+            if (Array.isArray(candidate.parentIds)) {
+              candidate.parentIds = candidate.parentIds.filter((id) => id !== item.id);
+            }
           });
         }
       });

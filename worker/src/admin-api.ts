@@ -353,36 +353,48 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       skipped += 1;
       continue;
     }
-    seenNames.add(name);
 
-    let rawConfig = item.rawConfig;
-    if (item.parentId) {
-      const carrier = byId.get(item.parentId);
-      if (!carrier) {
-        skipped += 1;
-        errors.push(`${item.name}: selected TLS carrier not found`);
-        continue;
-      }
-      rawConfig = composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType);
+    const carrierIds = item.parentIds || [];
+    const validCarriers = carrierIds
+      .map((id) => byId.get(id))
+      .filter((carrier): carrier is ImportCandidate => Boolean(carrier));
+    if (carrierIds.length > 0 && validCarriers.length === 0) {
+      skipped += 1;
+      errors.push(`${item.name}: selected TLS carrier not found`);
+      continue;
     }
 
-    try {
-      const result = await upsertProxyNodeByName(env, {
-        name,
-        remark: remark || item.sourceName,
-        rawConfig,
-        sourceType: item.sourceType,
-        protocol: item.protocol,
-        enabled: body.enabled === undefined ? true : body.enabled,
-        useTunnel: false,
-        selectedEndpointIds: []
-      });
-      imported.push(result.row);
-      if (result.created) created += 1;
-      else updated += 1;
-    } catch (error) {
-      skipped += 1;
-      errors.push(`${item.name}: ${error instanceof Error ? error.message : "import failed"}`);
+    const variants = validCarriers.length > 0
+      ? validCarriers.map((carrier) => ({
+        name: validCarriers.length > 1 ? `${name} @ ${carrier.name}` : name,
+        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType)
+      }))
+      : [{ name, rawConfig: item.rawConfig }];
+
+    for (const variant of variants) {
+      if (seenNames.has(variant.name)) {
+        skipped += 1;
+        continue;
+      }
+      seenNames.add(variant.name);
+      try {
+        const result = await upsertProxyNodeByName(env, {
+          name: variant.name,
+          remark: remark || item.sourceName,
+          rawConfig: variant.rawConfig,
+          sourceType: item.sourceType,
+          protocol: item.protocol,
+          enabled: body.enabled === undefined ? true : body.enabled,
+          useTunnel: false,
+          selectedEndpointIds: []
+        });
+        imported.push(result.row);
+        if (result.created) created += 1;
+        else updated += 1;
+      } catch (error) {
+        skipped += 1;
+        errors.push(`${variant.name}: ${error instanceof Error ? error.message : "import failed"}`);
+      }
     }
   }
 
@@ -408,10 +420,10 @@ interface ImportCandidate {
   sni?: string;
   transport?: string;
   tls: boolean;
+  asTlsCarrier?: boolean;
   duplicate: boolean;
   removed?: boolean;
-  parentId?: string;
-  parentName?: string;
+  parentIds?: string[];
 }
 
 async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
@@ -466,8 +478,9 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
   const excludeKeywords = stringArray(rules.excludeKeywords ?? rules.exclude_keywords).map((item) => item.toLowerCase());
   const includeKeywords = stringArray(rules.includeKeywords ?? rules.include_keywords).map((item) => item.toLowerCase());
   const removedNames = new Set(stringArray(rules.removedNames ?? rules.removed_names));
-  const parentByName = isRecord(rules.parentByName ?? rules.parent_by_name)
-    ? (rules.parentByName ?? rules.parent_by_name) as JsonRecord
+  const carrierNames = new Set(stringArray(rules.carrierNames ?? rules.carrier_names));
+  const parentNamesByName = isRecord(rules.parentNamesByName ?? rules.parent_names_by_name)
+    ? (rules.parentNamesByName ?? rules.parent_names_by_name) as JsonRecord
     : {};
   const byName = new Map(candidates.map((item) => [item.name, item]));
 
@@ -476,14 +489,16 @@ function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): Imp
     const includeMatched = includeKeywords.length === 0 || includeKeywords.some((keyword) => haystack.includes(keyword));
     const excludeMatched = excludeKeywords.some((keyword) => haystack.includes(keyword));
     item.removed = removedNames.has(item.name) || !includeMatched || excludeMatched;
+    item.asTlsCarrier = carrierNames.has(item.name);
   }
 
   for (const item of candidates) {
-    const parentName = typeof parentByName[item.name] === "string" ? String(parentByName[item.name]) : "";
-    const parent = parentName ? byName.get(parentName) : null;
-    if (parent && !item.removed && !parent.removed) {
-      item.parentName = parent.name;
-      item.parentId = parent.id;
+    const parentNames = stringArray(parentNamesByName[item.name]);
+    const parents = Array.from(new Set(parentNames))
+      .map((name) => byName.get(name))
+      .filter((parent): parent is ImportCandidate => Boolean(parent && parent.asTlsCarrier && !item.removed && !parent.removed));
+    if (parents.length > 0) {
+      item.parentIds = parents.map((parent) => parent.id);
     }
   }
   return candidates;
@@ -498,8 +513,11 @@ function importRulesFromBody(body: JsonRecord): JsonRecord {
   if (Array.isArray(body.removedNames ?? body.removed_names)) {
     rules.removedNames = stringArray(body.removedNames ?? body.removed_names);
   }
-  if (isRecord(body.parentByName ?? body.parent_by_name)) {
-    rules.parentByName = body.parentByName ?? body.parent_by_name;
+  if (isRecord(body.parentNamesByName ?? body.parent_names_by_name)) {
+    rules.parentNamesByName = body.parentNamesByName ?? body.parent_names_by_name;
+  }
+  if (Array.isArray(body.carrierNames ?? body.carrier_names)) {
+    rules.carrierNames = stringArray(body.carrierNames ?? body.carrier_names);
   }
   return rules;
 }
@@ -530,9 +548,10 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
         sni: optionalString(item.sni) || undefined,
         transport: optionalString(item.transport) || undefined,
         tls: Boolean(item.tls),
+        asTlsCarrier: Boolean(item.asTlsCarrier ?? item.as_tls_carrier),
         duplicate: Boolean(item.duplicate),
         removed: Boolean(item.removed),
-        parentId: optionalString(item.parentId ?? item.parent_id) || undefined
+        parentIds: stringArray(item.parentIds ?? item.parent_ids)
       };
     });
 }
@@ -625,7 +644,7 @@ async function updateImportSource(env: Env, id: string, body: JsonRecord): Promi
     && body.excludeKeywords === undefined && body.exclude_keywords === undefined
     && body.includeKeywords === undefined && body.include_keywords === undefined
     && body.removedNames === undefined && body.removed_names === undefined
-    && body.parentByName === undefined && body.parent_by_name === undefined
+    && body.parentNamesByName === undefined && body.parent_names_by_name === undefined
     ? parseJsonObject(current.rules_json)
     : importRulesFromBody(body);
   await run(
