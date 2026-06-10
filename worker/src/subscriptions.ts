@@ -16,6 +16,12 @@ interface TunnelSelectionRow {
   public_url: string | null;
 }
 
+interface SniSelectionRow {
+  proxy_node_id: string;
+  sni_id: string;
+  hostname: string;
+}
+
 interface GroupRow {
   endpoint_mode: SubscriptionOptions["endpointMode"];
   endpoint_filter_json: string;
@@ -112,7 +118,7 @@ export async function listGeneratedNodes(env: Env, options: SubscriptionOptions)
 
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, endpoints, selections, tunnelSelections, groupFilter] = await Promise.all([
+  const [nodes, endpoints, selections, tunnelSelections, sniSelections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
@@ -125,6 +131,13 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
        FROM proxy_node_tunnel_selections pts
        JOIN tunnels t ON t.id = pts.tunnel_id
        WHERE pts.enabled = 1`
+    ),
+    all<SniSelectionRow>(
+      env.DB,
+      `SELECT pss.proxy_node_id, pss.sni_id, s.hostname
+       FROM proxy_node_sni_selections pss
+       JOIN custom_snis s ON s.id = pss.sni_id
+       WHERE pss.enabled = 1 AND s.enabled = 1`
     ),
     loadGroupFilter(env, effectiveOptions.group)
   ]);
@@ -145,37 +158,59 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     tunnelsByNode.set(selection.proxy_node_id, rows);
   }
 
+  const snisByNode = new Map<string, SniSelectionRow[]>();
+  for (const selection of sniSelections) {
+    const rows = snisByNode.get(selection.proxy_node_id) || [];
+    rows.push(selection);
+    snisByNode.set(selection.proxy_node_id, rows);
+  }
+
   const output: GeneratedNode[] = [];
   for (const node of nodes) {
     const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
 
     if (!node.use_tunnel) {
-      output.push(generateOne(node, null, null, null, effectiveOptions));
+      output.push(generateOne(node, null, null, null, null, effectiveOptions));
       continue;
     }
 
-    const selectedTunnels = selectedTunnelsForNode(node, tunnelsByNode);
-    if (selectedTunnels.length === 0) {
-      output.push(generateOne(node, null, null, null, effectiveOptions));
+    const selectedTraffic = selectedTrafficForNode(node, tunnelsByNode, snisByNode);
+    if (selectedTraffic.length === 0) {
+      output.push(generateOne(node, null, null, null, null, effectiveOptions));
       continue;
     }
 
-    for (const tunnel of selectedTunnels) {
-      const tunnelHost = tunnel.public_hostname;
+    for (const traffic of selectedTraffic) {
+      const tunnelHost = traffic.hostname;
       if (!tunnelHost) {
-        output.push(generateOne(node, tunnel.tunnel_id, null, null, effectiveOptions));
+        output.push(generateOne(node, traffic.id, traffic.sniId || null, null, null, effectiveOptions));
         continue;
       }
       if (selected.length === 0) {
-        output.push(generateOne(node, tunnel.tunnel_id, tunnelHost, null, effectiveOptions));
+        output.push(generateOne(node, traffic.id, traffic.sniId || null, tunnelHost, null, effectiveOptions));
         continue;
       }
       for (const endpoint of selected) {
-        output.push(generateOne(node, tunnel.tunnel_id, tunnelHost, endpoint, effectiveOptions));
+        output.push(generateOne(node, traffic.id, traffic.sniId || null, tunnelHost, endpoint, effectiveOptions));
       }
     }
   }
   return filterGeneratedByGroup(output, groupFilter);
+}
+
+function selectedTrafficForNode(
+  node: ProxyNodeRow,
+  tunnelsByNode: Map<string, TunnelSelectionRow[]>,
+  snisByNode: Map<string, SniSelectionRow[]>
+): Array<{ id: string; sniId?: string; hostname: string | null }> {
+  const output: Array<{ id: string; sniId?: string; hostname: string | null }> = [];
+  for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
+    output.push({ id: tunnel.tunnel_id, hostname: tunnel.public_hostname });
+  }
+  for (const sni of snisByNode.get(node.id) || []) {
+    output.push({ id: `sni:${sni.sni_id}`, sniId: sni.sni_id, hostname: sni.hostname });
+  }
+  return output;
 }
 
 function selectedTunnelsForNode(
@@ -278,15 +313,18 @@ function selectEndpoints(
 function generateOne(
   node: ProxyNodeRow,
   tunnelId: string | null,
+  sniId: string | null,
   tunnelHost: string | null,
   endpoint: PreferredEndpointRow | null,
   options: SubscriptionOptions
 ): GeneratedNode {
   const ctx = { node, tunnelHost, endpoint, format: options.format };
-  const id = `${node.id}:${tunnelId || "direct"}:${endpoint?.id || "direct"}`;
+  const trafficId = sniId ? `sni:${sniId}` : tunnelId || "direct";
+  const id = `${node.id}:${trafficId}:${endpoint?.id || "direct"}`;
   const metadata = {
     id,
     tunnelId: tunnelId || undefined,
+    sniId: sniId || undefined,
     endpointLabel: endpoint?.label || undefined
   };
   if (options.format === "sing-box") {

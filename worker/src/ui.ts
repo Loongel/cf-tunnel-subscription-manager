@@ -101,6 +101,10 @@ export function renderAdminUi(env: Env): string {
       color: var(--selected-text);
       box-shadow: 0 0 0 999px var(--selected) inset;
     }
+    select option:disabled {
+      color: #7f8b9a;
+      background: #1b2433;
+    }
     textarea { min-height: 108px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 9px 8px; vertical-align: top; }
@@ -193,6 +197,7 @@ export function renderAdminUi(env: Env): string {
     <nav id="tabs">
       <button data-tab="dashboard" class="active">Dashboard</button>
       <button data-tab="tunnels">Tunnels</button>
+      <button data-tab="snis">SNI</button>
       <button data-tab="nodes">Proxy Nodes</button>
       <button data-tab="endpoints">Preferred Endpoints</button>
       <button data-tab="subscriptions">Subscriptions</button>
@@ -218,7 +223,32 @@ export function renderAdminUi(env: Env): string {
       </div>
     </section>
 
+    <section id="snis" class="view hidden">
+      <div class="section">
+        <div class="toolbar">
+          <h2>SNI Pool</h2>
+          <div class="actions"><button id="refreshSnis">Refresh</button><button id="cancelSniEdit" class="subtle">Cancel Edit</button></div>
+        </div>
+        <div class="formgrid">
+          <label>Name<input id="sniName" placeholder="edge-sni"></label>
+          <label>Hostname<input id="sniHostname" placeholder="example.com"></label>
+          <label>Enabled<select id="sniEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+          <label>Sort Order<input id="sniSort" type="number" value="0"></label>
+          <label class="wide">Remark<input id="sniRemark" placeholder="optional"></label>
+          <div class="actions"><button id="saveSni" class="primary">Add SNI</button></div>
+        </div>
+      </div>
+      <div class="section">
+        <table><thead><tr><th>Name</th><th>Hostname</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="snisBody"></tbody></table>
+      </div>
+    </section>
+
     <section id="nodes" class="view hidden">
+      <div class="actions" style="margin-bottom: 12px;">
+        <button data-node-panel="nodeManagePanel" class="active">Node Management</button>
+        <button data-node-panel="importManagePanel">Subscription Imports</button>
+      </div>
+      <div id="nodeManagePanel" class="node-panel">
       <div class="split">
         <div class="stack">
           <div class="section">
@@ -232,30 +262,6 @@ export function renderAdminUi(env: Env): string {
               <label>Enabled<select id="sourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
               <div class="actions"><button id="saveNodeSource" class="primary">Add Source</button></div>
               <label class="full">Raw Config<textarea id="sourceRaw" placeholder="vless://, vmess://, trojan://, ss:// or sing-box outbound JSON"></textarea></label>
-            </div>
-          </div>
-
-          <div class="section">
-            <h2>Import From Subscription</h2>
-            <div class="formgrid">
-              <label class="wide">Subscription URLs<textarea id="importUrls" placeholder="https://example.com/sub.txt"></textarea></label>
-              <label class="wide">Paste Content<textarea id="importContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
-              <label>Name Prefix<input id="importPrefix" placeholder="optional"></label>
-              <div class="actions"><button id="previewImport" class="primary">Preview Import</button><button id="commitImport">Commit Selected</button></div>
-              <label class="wide">Keyword Filter<input id="importFilterText" placeholder="hk, test, expire"></label>
-              <label>Filter Mode<select id="importFilterMode"><option value="exclude">Move matching to unused</option><option value="include">Keep only matching</option></select></label>
-              <div class="actions"><button id="applyImportFilter" class="subtle">Apply Filter</button><button id="clearImportReview" class="subtle">Clear Preview</button></div>
-            </div>
-            <div id="importReview" class="import-review hidden">
-              <div class="toolbar"><h3>Import Review</h3><div class="small muted"><span id="importActiveCount" class="count">0</span> selected / <span id="importRemovedCount" class="count">0</span> unused</div></div>
-              <div class="subpanel">
-                <div class="toolbar"><h3>Selected Nodes</h3><span class="small muted">Choose a TLS carrier for HTTP/content nodes before commit.</span></div>
-                <div id="importActiveList" class="import-list"></div>
-              </div>
-              <div class="subpanel">
-                <div class="toolbar"><h3>Unused Nodes</h3><span class="small muted">Removed before saving.</span></div>
-                <div id="importRemovedList" class="import-list"></div>
-              </div>
             </div>
           </div>
         </div>
@@ -275,10 +281,6 @@ export function renderAdminUi(env: Env): string {
             </div>
             <div class="subpanel stack">
               <label>Tunnel / SNI<select id="bindingTraffic" multiple></select></label>
-              <div>
-                <label>Global Endpoints</label>
-                <div id="globalEndpointChips" class="chips"></div>
-              </div>
               <label>Additional Endpoints<select id="bindingEndpoints" multiple></select></label>
               <div class="actions">
                 <button id="applyBinding" class="primary">Apply To Selected Nodes</button>
@@ -291,6 +293,47 @@ export function renderAdminUi(env: Env): string {
 
       <div class="section">
         <table><thead><tr><th>Node</th><th>Protocol</th><th>Traffic</th><th>Endpoints</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="nodesBody"></tbody></table>
+      </div>
+      </div>
+      <div id="importManagePanel" class="node-panel hidden">
+        <div class="section">
+          <div class="toolbar"><h2>Subscription Import Sources</h2><button id="refreshImportSources">Refresh</button></div>
+          <div class="formgrid">
+            <label>Name<input id="importSourceName" placeholder="airport-a"></label>
+            <label>Type<select id="importSourceKind"><option value="url">URL</option><option value="content">Pasted Content</option></select></label>
+            <label class="wide">Subscription URL<input id="importSourceUrl" placeholder="https://example.com/sub.txt"></label>
+            <label class="wide">Paste Content<textarea id="importSourceContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
+            <label>Name Prefix<input id="importPrefix" placeholder="optional"></label>
+            <label>Enabled<select id="importSourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+            <label>Exclude Keywords<input id="importExcludeKeywords" placeholder="expire, test"></label>
+            <label>Include Keywords<input id="importIncludeKeywords" placeholder="hk, jp"></label>
+            <div class="actions"><button id="saveImportSource" class="primary">Save Source</button><button id="cancelImportSourceEdit" class="subtle">Cancel Edit</button></div>
+          </div>
+        </div>
+        <div class="section">
+          <table><thead><tr><th>Name</th><th>Source</th><th>Rules</th><th>Last Run</th><th>Actions</th></tr></thead><tbody id="importSourcesBody"></tbody></table>
+        </div>
+        <div class="section">
+          <div class="toolbar"><h2>Import Review</h2><div class="actions"><button id="previewImport" class="primary">Preview Source</button><button id="commitImport">Commit Selected</button><button id="saveImportRules">Save Rules</button></div></div>
+          <div class="formgrid">
+            <label class="wide">Ad-hoc Subscription URL<textarea id="importUrls" placeholder="https://example.com/sub.txt"></textarea></label>
+            <label class="wide">Ad-hoc Paste Content<textarea id="importContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
+            <label class="wide">Keyword Filter<input id="importFilterText" placeholder="hk, test, expire"></label>
+            <label>Filter Mode<select id="importFilterMode"><option value="exclude">Move matching to unused</option><option value="include">Keep only matching</option></select></label>
+            <div class="actions"><button id="applyImportFilter" class="subtle">Apply Filter</button><button id="clearImportReview" class="subtle">Clear Preview</button></div>
+          </div>
+          <div id="importReview" class="import-review hidden">
+            <div class="toolbar"><h3>Import Review</h3><div class="small muted"><span id="importActiveCount" class="count">0</span> selected / <span id="importRemovedCount" class="count">0</span> unused</div></div>
+            <div class="subpanel">
+              <div class="toolbar"><h3>Selected Nodes</h3><span class="small muted">Choose a TLS carrier for HTTP/content nodes before commit.</span></div>
+              <div id="importActiveList" class="import-list"></div>
+            </div>
+            <div class="subpanel">
+              <div class="toolbar"><h3>Unused Nodes</h3><span class="small muted">Removed before saving.</span></div>
+              <div id="importRemovedList" class="import-list"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -360,10 +403,13 @@ export function renderAdminUi(env: Env): string {
 
   <script>
     const BASE_URL = ${JSON.stringify(baseUrl)};
-    const state = { overview: null, tunnels: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importCandidates: [] };
+    const state = { overview: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
     let editingGroupId = null;
+    let editingSniId = null;
+    let editingImportSourceId = null;
+    let activeImportSourceId = null;
 
     const byId = (id) => document.getElementById(id);
     const tokenInput = byId('tokenInput');
@@ -374,8 +420,10 @@ export function renderAdminUi(env: Env): string {
     const metricCommands = byId('metricCommands');
     const eventsBody = byId('eventsBody');
     const tunnelsBody = byId('tunnelsBody');
+    const snisBody = byId('snisBody');
     const nodesBody = byId('nodesBody');
     const endpointsBody = byId('endpointsBody');
+    const importSourcesBody = byId('importSourcesBody');
     const groupsBody = byId('groupsBody');
     const subscriptionLinks = byId('subscriptionLinks');
     const previewOutput = byId('previewOutput');
@@ -416,7 +464,10 @@ export function renderAdminUi(env: Env): string {
     function lockedRow(cols) { return '<tr><td colspan="' + cols + '" class="muted">Login required.</td></tr>'; }
     function markSelected(select, values) {
       const set = new Set(values || []);
-      Array.from(select.options).forEach((option) => { option.selected = set.has(option.value); });
+      Array.from(select.options).forEach((option) => { option.selected = option.disabled || set.has(option.value); });
+    }
+    function selectedAdditionalEndpointIds() {
+      return selectedValues(byId('bindingEndpoints')).filter((id) => !id.startsWith('global:'));
     }
     function applyMetrics(data) {
       state.overview = data;
@@ -437,19 +488,22 @@ export function renderAdminUi(env: Env): string {
       subscriptionLinks.innerHTML = '<tr><td class="muted">Login required.</td></tr>';
       previewOutput.textContent = '';
       state.tunnels = [];
+      state.snis = [];
       state.nodes = [];
       state.endpoints = [];
+      state.importSources = [];
       state.groups = [];
       state.generatedNodes = [];
       renderTunnelOptions();
       renderBindingNodeList();
       renderEndpointOptions();
       renderGeneratedNodeOptions();
+      snisBody.innerHTML = lockedRow(4);
+      importSourcesBody.innerHTML = lockedRow(5);
     }
     function activate(tab) {
       document.querySelectorAll('.view').forEach((el) => el.classList.toggle('hidden', el.id !== tab));
       document.querySelectorAll('#tabs button').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
-      refreshAll();
     }
 
     byId('tabs').addEventListener('click', (e) => {
@@ -477,13 +531,24 @@ export function renderAdminUi(env: Env): string {
         '<tr><td>' + esc(row.type) + '</td><td>' + statusPill(row.health_status) + '</td><td>' + esc(row.swarm_node_name || row.agent_id) + '</td><td class="mono">' + esc(row.target_url) + '</td><td class="mono">' + esc(row.public_hostname) + '</td><td>' + esc(row.last_seen_at) + '</td><td class="row-actions"><button data-copy="' + esc(row.public_hostname || '') + '">Copy</button>' + (row.type === 'quick' ? '<button data-restart="' + esc(row.id) + '">Restart</button>' : '') + '</td></tr>'
       ).join('') || '<tr><td colspan="7" class="muted">No tunnels.</td></tr>';
     }
+    async function refreshSnis() {
+      const data = await api('/api/admin/custom-snis');
+      state.snis = data.customSnis || [];
+      renderTunnelOptions();
+      snisBody.innerHTML = state.snis.map((row) =>
+        '<tr><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td class="mono">' + esc(row.hostname) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-sni="' + esc(row.id) + '">Edit</button><button data-delete-sni="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+      ).join('') || '<tr><td colspan="4" class="muted">No custom SNI.</td></tr>';
+    }
     async function refreshNodes() {
       const data = await api('/api/admin/proxy-nodes');
       state.nodes = data.proxyNodes || [];
       renderBindingNodeList();
       nodesBody.innerHTML = state.nodes.map((row) => {
-        const tunnelIds = row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : []);
-        const path = row.use_tunnel ? (tunnelIds.length + ' Tunnel / SNI') : 'Direct';
+        const trafficIds = row.selectedTrafficIds || [
+          ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
+          ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
+        ];
+        const path = row.use_tunnel && trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
         const endpointText = row.use_tunnel ? globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional' : 'Direct';
         return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
@@ -510,14 +575,32 @@ export function renderAdminUi(env: Env): string {
         return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td>' + groupChipsHtml(ids) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
     }
+    async function refreshImportSources() {
+      const data = await api('/api/admin/import-sources');
+      state.importSources = data.importSources || [];
+      importSourcesBody.innerHTML = state.importSources.map((row) => {
+        const rules = row.rules || {};
+        const exclude = (rules.excludeKeywords || []).join(', ');
+        const include = (rules.includeKeywords || []).join(', ');
+        const removed = (rules.removedNames || []).length || 0;
+        const parentCount = Object.keys(rules.parentByName || {}).length;
+        const source = row.source_kind === 'url' ? row.url : 'pasted content';
+        const ruleText = [include ? 'include: ' + include : '', exclude ? 'exclude: ' + exclude : '', removed ? removed + ' unused' : '', parentCount ? parentCount + ' fallback links' : ''].filter(Boolean).join(' / ') || '-';
+        return '<tr><td>' + esc(row.name) + '<br>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="mono">' + esc(source || '') + '</td><td>' + esc(ruleText) + '</td><td>' + esc(row.last_imported_at || row.last_error || '-') + '</td><td class="row-actions"><button data-edit-import-source="' + esc(row.id) + '">Edit</button><button data-preview-import-source="' + esc(row.id) + '">Preview</button><button data-refresh-import-source="' + esc(row.id) + '">Refresh</button><button data-delete-import-source="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+      }).join('') || '<tr><td colspan="5" class="muted">No import sources.</td></tr>';
+    }
 
     function globalEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope === 'global'); }
     function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global'); }
     function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
-      const options = state.tunnels.map((t) =>
-        '<option value="' + esc(t.id) + '">' + esc('Tunnel SNI: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id)) + '</option>'
+      const tunnelOptions = state.tunnels.map((t) =>
+        '<option value="tunnel:' + esc(t.id) + '">' + esc('Tunnel: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id)) + '</option>'
       ).join('');
+      const sniOptions = state.snis.filter((s) => s.enabled).map((s) =>
+        '<option value="sni:' + esc(s.id) + '">' + esc('SNI: ' + (s.name || s.hostname) + ' / ' + s.hostname) + '</option>'
+      ).join('');
+      const options = tunnelOptions + sniOptions;
       byId('bindingTraffic').innerHTML = options;
     }
     function renderBindingNodeList() {
@@ -530,13 +613,14 @@ export function renderAdminUi(env: Env): string {
       updateBindingSelectedCount();
     }
     function renderEndpointOptions() {
+      const globals = globalEndpoints().map((e) =>
+        '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
+      ).join('');
       const options = bindingEndpoints().map((e) => {
         const label = (e.label || e.value) + ' / ' + e.type;
         return '<option value="' + esc(e.id) + '">' + esc(label) + '</option>';
       }).join('');
-      byId('bindingEndpoints').innerHTML = options;
-      const chips = globalEndpoints().map((e) => '<span class="chip">' + esc((e.label || e.value) + ' / ' + e.type) + '</span>').join('');
-      byId('globalEndpointChips').innerHTML = chips || '<span class="muted small">No global endpoints configured.</span>';
+      byId('bindingEndpoints').innerHTML = globals + options;
     }
     function renderGeneratedNodeOptions() {
       const selected = new Set(selectedDerivedIds());
@@ -629,6 +713,21 @@ export function renderAdminUi(env: Env): string {
         .filter((item) => !item.removed)
         .map((item) => ({ ...item, parentId: activeIds.has(item.parentId) ? item.parentId : '' }));
     }
+    function importRulesFromReview() {
+      const candidateById = new Map(state.importCandidates.map((item) => [item.id, item]));
+      const parentByName = {};
+      state.importCandidates.forEach((item) => {
+        if (!item.removed && item.parentId && candidateById.get(item.parentId)) {
+          parentByName[item.name] = candidateById.get(item.parentId).name;
+        }
+      });
+      return {
+        excludeKeywords: byId('importExcludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
+        includeKeywords: byId('importIncludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
+        removedNames: state.importCandidates.filter((item) => item.removed).map((item) => item.name),
+        parentByName
+      };
+    }
 
     function resetNodeSourceForm() {
       editingNodeId = null;
@@ -647,6 +746,28 @@ export function renderAdminUi(env: Env): string {
       byId('endpointValues').value = '';
       byId('endpointLabel').value = '';
       byId('endpointSort').value = '0';
+    }
+    function resetSniForm() {
+      editingSniId = null;
+      byId('saveSni').textContent = 'Add SNI';
+      byId('sniName').value = '';
+      byId('sniHostname').value = '';
+      byId('sniRemark').value = '';
+      byId('sniEnabled').value = 'true';
+      byId('sniSort').value = '0';
+    }
+    function resetImportSourceForm() {
+      editingImportSourceId = null;
+      activeImportSourceId = null;
+      byId('saveImportSource').textContent = 'Save Source';
+      byId('importSourceName').value = '';
+      byId('importSourceKind').value = 'url';
+      byId('importSourceUrl').value = '';
+      byId('importSourceContent').value = '';
+      byId('importPrefix').value = '';
+      byId('importSourceEnabled').value = 'true';
+      byId('importExcludeKeywords').value = '';
+      byId('importIncludeKeywords').value = '';
     }
     function resetGroupForm() {
       editingGroupId = null;
@@ -673,7 +794,11 @@ export function renderAdminUi(env: Env): string {
     function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
     function loadBindingFromNode(row) {
       markBindingNodes([row.id]);
-      markSelected(byId('bindingTraffic'), row.use_tunnel ? (row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])) : []);
+      const traffic = row.selectedTrafficIds || [
+        ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
+        ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
+      ];
+      markSelected(byId('bindingTraffic'), row.use_tunnel ? traffic : []);
       markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
     }
     function loadNodeForEditing(row) {
@@ -746,6 +871,10 @@ export function renderAdminUi(env: Env): string {
           t.classList.toggle('selected');
           updateGroupSelectedCount();
         }
+        if (t.dataset.nodePanel) {
+          document.querySelectorAll('.node-panel').forEach((el) => el.classList.toggle('hidden', el.id !== t.dataset.nodePanel));
+          document.querySelectorAll('[data-node-panel]').forEach((el) => el.classList.toggle('active', el.dataset.nodePanel === t.dataset.nodePanel));
+        }
         if (t.dataset.removeImport) {
           const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.removeImport);
           if (item) {
@@ -767,6 +896,62 @@ export function renderAdminUi(env: Env): string {
           await api('/api/admin/tunnels/' + t.dataset.restart + '/restart', { method: 'POST', body: '{}' });
           setNotice('Restart command queued.', 'ok');
           await refreshTunnels();
+        }
+        if (t.dataset.editSni) {
+          const row = state.snis.find((item) => item.id === t.dataset.editSni);
+          if (row) {
+            editingSniId = row.id;
+            byId('saveSni').textContent = 'Save SNI';
+            byId('sniName').value = row.name || '';
+            byId('sniHostname').value = row.hostname || '';
+            byId('sniRemark').value = row.remark || '';
+            byId('sniEnabled').value = row.enabled ? 'true' : 'false';
+            byId('sniSort').value = String(row.sort_order || 0);
+          }
+        }
+        if (t.dataset.deleteSni) {
+          await api('/api/admin/custom-snis/' + t.dataset.deleteSni, { method: 'DELETE' });
+          setNotice('SNI deleted.', 'ok');
+          await refreshSnis();
+          await refreshGeneratedNodes();
+          await refreshGroups();
+        }
+        if (t.dataset.editImportSource) {
+          const row = state.importSources.find((item) => item.id === t.dataset.editImportSource);
+          if (row) {
+            editingImportSourceId = row.id;
+            activeImportSourceId = row.id;
+            const rules = row.rules || {};
+            byId('saveImportSource').textContent = 'Update Source';
+            byId('importSourceName').value = row.name || '';
+            byId('importSourceKind').value = row.source_kind || 'url';
+            byId('importSourceUrl').value = row.url || '';
+            byId('importSourceContent').value = row.content || '';
+            byId('importPrefix').value = row.name_prefix || '';
+            byId('importSourceEnabled').value = row.enabled ? 'true' : 'false';
+            byId('importExcludeKeywords').value = (rules.excludeKeywords || []).join(', ');
+            byId('importIncludeKeywords').value = (rules.includeKeywords || []).join(', ');
+          }
+        }
+        if (t.dataset.previewImportSource) {
+          activeImportSourceId = t.dataset.previewImportSource;
+          const data = await api('/api/admin/import-sources/' + activeImportSourceId + '/preview');
+          state.importCandidates = data.candidates || [];
+          renderImportReview();
+          setNotice('Source preview loaded ' + state.importCandidates.length + ' candidate node(s).', state.importCandidates.length ? 'ok' : 'warn');
+        }
+        if (t.dataset.refreshImportSource) {
+          const data = await api('/api/admin/import-sources/' + t.dataset.refreshImportSource + '/refresh', { method: 'POST', body: '{}' });
+          setNotice('Source refreshed: imported ' + data.imported + ', updated ' + data.updated + ', skipped ' + data.skipped + '.', data.imported || data.updated ? 'ok' : 'warn');
+          await refreshImportSources();
+          await refreshNodes();
+          await refreshGeneratedNodes();
+          await refreshGroups();
+        }
+        if (t.dataset.deleteImportSource) {
+          await api('/api/admin/import-sources/' + t.dataset.deleteImportSource, { method: 'DELETE' });
+          setNotice('Import source deleted.', 'ok');
+          await refreshImportSources();
         }
         if (t.dataset.editNode) {
           const row = state.nodes.find((item) => item.id === t.dataset.editNode);
@@ -835,10 +1020,58 @@ export function renderAdminUi(env: Env): string {
     byId('cancelNodeEdit').onclick = resetNodeSourceForm;
     byId('cancelEndpointEdit').onclick = resetEndpointForm;
     byId('cancelGroupEdit').onclick = resetGroupForm;
+    byId('cancelSniEdit').onclick = resetSniForm;
+    byId('cancelImportSourceEdit').onclick = resetImportSourceForm;
     byId('selectAllBindingNodes').onclick = () => markBindingNodes(state.nodes.map((node) => node.id));
     byId('clearBindingNodes').onclick = () => markBindingNodes([]);
     byId('selectAllDerived').onclick = () => markDerivedCandidates(state.generatedNodes.map((node) => node.id));
     byId('clearDerived').onclick = () => markDerivedCandidates([]);
+
+    byId('saveSni').onclick = async () => {
+      try {
+        const path = editingSniId ? '/api/admin/custom-snis/' + editingSniId : '/api/admin/custom-snis';
+        const method = editingSniId ? 'PATCH' : 'POST';
+        const wasEditing = Boolean(editingSniId);
+        await api(path, { method, body: JSON.stringify({
+          name: byId('sniName').value,
+          hostname: byId('sniHostname').value,
+          remark: byId('sniRemark').value,
+          enabled: byId('sniEnabled').value === 'true',
+          sortOrder: Number(byId('sniSort').value || 0)
+        }) });
+        resetSniForm();
+        setNotice(wasEditing ? 'SNI saved.' : 'SNI added.', 'ok');
+        await refreshSnis();
+        await refreshGeneratedNodes();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
+
+    byId('saveImportSource').onclick = async () => {
+      try {
+        const path = editingImportSourceId ? '/api/admin/import-sources/' + editingImportSourceId : '/api/admin/import-sources';
+        const method = editingImportSourceId ? 'PATCH' : 'POST';
+        const rules = importRulesFromReview();
+        const sourceKind = byId('importSourceKind').value;
+        const data = await api(path, { method, body: JSON.stringify({
+          name: byId('importSourceName').value,
+          sourceKind,
+          url: sourceKind === 'url' ? byId('importSourceUrl').value : null,
+          content: sourceKind === 'content' ? byId('importSourceContent').value : null,
+          namePrefix: byId('importPrefix').value,
+          enabled: byId('importSourceEnabled').value === 'true',
+          rules
+        }) });
+        activeImportSourceId = (data.importSource && data.importSource.id) || editingImportSourceId;
+        editingImportSourceId = activeImportSourceId;
+        byId('saveImportSource').textContent = 'Update Source';
+        setNotice('Import source saved.', 'ok');
+        await refreshImportSources();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
 
     byId('saveNodeSource').onclick = async () => {
       try {
@@ -861,15 +1094,20 @@ export function renderAdminUi(env: Env): string {
     };
     byId('previewImport').onclick = async () => {
       try {
-        const data = await api('/api/admin/proxy-nodes/import-preview', {
-          method: 'POST',
-          body: JSON.stringify({
-            urls: byId('importUrls').value,
-            content: byId('importContent').value,
-            namePrefix: byId('importPrefix').value
-          })
-        });
-        state.importCandidates = (data.candidates || []).map((item) => ({ ...item, removed: false, parentId: '' }));
+        let data;
+        if (activeImportSourceId) {
+          data = await api('/api/admin/import-sources/' + activeImportSourceId + '/preview');
+        } else {
+          data = await api('/api/admin/proxy-nodes/import-preview', {
+            method: 'POST',
+            body: JSON.stringify({
+              urls: byId('importUrls').value,
+              content: byId('importContent').value,
+              namePrefix: byId('importPrefix').value
+            })
+          });
+        }
+        state.importCandidates = (data.candidates || []).map((item) => ({ ...item, removed: Boolean(item.removed), parentId: item.parentId || '' }));
         renderImportReview();
         setNotice('Preview loaded ' + state.importCandidates.length + ' candidate node(s)' + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , state.importCandidates.length ? 'ok' : 'warn');
       } catch (err) {
@@ -900,6 +1138,19 @@ export function renderAdminUi(env: Env): string {
       renderImportReview();
       setNotice('Import preview cleared.', 'warn');
     };
+    byId('saveImportRules').onclick = async () => {
+      try {
+        if (!activeImportSourceId) throw new Error('Save or select an import source before saving rules.');
+        await api('/api/admin/import-sources/' + activeImportSourceId, {
+          method: 'PATCH',
+          body: JSON.stringify({ rules: importRulesFromReview() })
+        });
+        setNotice('Import rules saved.', 'ok');
+        await refreshImportSources();
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
     byId('commitImport').onclick = async () => {
       try {
         const candidates = activeImportCandidatesForCommit();
@@ -923,13 +1174,13 @@ export function renderAdminUi(env: Env): string {
       try {
         const ids = selectedBindingNodeIds();
         if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
-        const selectedTunnelIds = selectedValues(byId('bindingTraffic'));
+        const selectedTrafficIds = selectedValues(byId('bindingTraffic'));
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
-            useTunnel: selectedTunnelIds.length > 0,
-            selectedTunnelIds,
-            selectedEndpointIds: selectedValues(byId('bindingEndpoints'))
+            useTunnel: selectedTrafficIds.length > 0,
+            selectedTrafficIds,
+            selectedEndpointIds: selectedAdditionalEndpointIds()
           })
         })));
         await refreshNodes();
@@ -1025,12 +1276,16 @@ export function renderAdminUi(env: Env): string {
     };
     byId('refreshDashboard').onclick = () => hasToken() ? refreshDashboard().catch((err) => setNotice(formatError(err), 'error')) : refreshAll();
     byId('refreshTunnels').onclick = () => refreshTunnels().catch((err) => setNotice(formatError(err), 'error'));
+    byId('refreshSnis').onclick = async () => {
+      try { await refreshSnis(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
+    };
     byId('refreshNodes').onclick = async () => {
       try { await refreshNodes(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
     };
     byId('refreshEndpoints').onclick = async () => {
       try { await refreshEndpoints(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
     };
+    byId('refreshImportSources').onclick = () => refreshImportSources().catch((err) => setNotice(formatError(err), 'error'));
 
     async function refreshAll(fromLogin) {
       try {
@@ -1046,8 +1301,10 @@ export function renderAdminUi(env: Env): string {
       try {
         await refreshDashboard();
         await refreshTunnels();
+        await refreshSnis();
         await refreshNodes();
         await refreshEndpoints();
+        await refreshImportSources();
         await refreshGeneratedNodes();
         await refreshGroups();
         if (fromLogin) setNotice('Signed in.', 'ok');

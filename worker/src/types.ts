@@ -97,6 +97,33 @@ export interface PreferredEndpointRow {
   updated_at: string;
 }
 
+export interface CustomSniRow {
+  id: string;
+  name: string;
+  hostname: string;
+  remark: string | null;
+  enabled: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImportSourceRow {
+  id: string;
+  name: string;
+  source_kind: "url" | "content";
+  url: string | null;
+  content: string | null;
+  name_prefix: string | null;
+  enabled: number;
+  rules_json: string;
+  last_fetched_at: string | null;
+  last_imported_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SubscriptionOptions {
   format: "v2ray" | "passwall2" | "sing-box";
   group?: string | null;
@@ -110,6 +137,7 @@ export interface GeneratedNode {
   sourceNodeId: string;
   sourceName: string;
   tunnelId?: string;
+  sniId?: string;
   endpointId?: string;
   endpointValue?: string;
   endpointLabel?: string;

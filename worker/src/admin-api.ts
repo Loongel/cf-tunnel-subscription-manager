@@ -10,7 +10,7 @@ import {
 import { inferProtocol } from "./protocols";
 import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from "./settings";
 import { listGeneratedNodes, parseSubscriptionOptions, previewSubscription } from "./subscriptions";
-import type { Env, JsonRecord, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
+import type { CustomSniRow, Env, ImportSourceRow, JsonRecord, JsonValue, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
 import {
   boolToInt,
   empty,
@@ -20,6 +20,7 @@ import {
   makeId,
   nowIso,
   optionalString,
+  parseJsonObject,
   readJson,
   requiredString,
   safeJson
@@ -89,6 +90,46 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 
   if (request.method === "POST" && path === "/api/admin/proxy-nodes/import-preview") {
     return json(await previewProxyNodeImport(env, await readJson(request)));
+  }
+
+  if (path === "/api/admin/custom-snis") {
+    if (request.method === "GET") return json({ customSnis: await listCustomSnis(env) });
+    if (request.method === "POST") return json({ customSni: await createCustomSni(env, await readJson(request)) }, { status: 201 });
+  }
+
+  const customSniMatch = /^\/api\/admin\/custom-snis\/([^/]+)$/.exec(path);
+  if (customSniMatch) {
+    const id = customSniMatch[1];
+    if (request.method === "PATCH") return json({ customSni: await updateCustomSni(env, id, await readJson(request)) });
+    if (request.method === "DELETE") {
+      await run(env.DB, "DELETE FROM custom_snis WHERE id = ?", id);
+      return empty();
+    }
+  }
+
+  if (path === "/api/admin/import-sources") {
+    if (request.method === "GET") return json({ importSources: await listImportSources(env) });
+    if (request.method === "POST") return json({ importSource: await createImportSource(env, await readJson(request)) }, { status: 201 });
+  }
+
+  const importSourceRefreshMatch = /^\/api\/admin\/import-sources\/([^/]+)\/refresh$/.exec(path);
+  if (request.method === "POST" && importSourceRefreshMatch) {
+    return json(await refreshImportSource(env, importSourceRefreshMatch[1]));
+  }
+
+  const importSourcePreviewMatch = /^\/api\/admin\/import-sources\/([^/]+)\/preview$/.exec(path);
+  if (request.method === "GET" && importSourcePreviewMatch) {
+    return json(await previewImportSource(env, importSourcePreviewMatch[1]));
+  }
+
+  const importSourceMatch = /^\/api\/admin\/import-sources\/([^/]+)$/.exec(path);
+  if (importSourceMatch) {
+    const id = importSourceMatch[1];
+    if (request.method === "PATCH") return json({ importSource: await updateImportSource(env, id, await readJson(request)) });
+    if (request.method === "DELETE") {
+      await run(env.DB, "DELETE FROM import_sources WHERE id = ?", id);
+      return empty();
+    }
   }
 
   const proxyNodeMatch = /^\/api\/admin\/proxy-nodes\/([^/]+)$/.exec(path);
@@ -226,11 +267,20 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
     env.DB,
     "SELECT proxy_node_id, tunnel_id FROM proxy_node_tunnel_selections WHERE enabled = 1"
   );
+  const sniSelections = await all<{ proxy_node_id: string; sni_id: string }>(
+    env.DB,
+    "SELECT proxy_node_id, sni_id FROM proxy_node_sni_selections WHERE enabled = 1"
+  );
   return rows.map((row) => ({
     ...row,
     groups: memberships.filter((item) => item.proxy_node_id === row.id),
     selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id),
-    selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections)
+    selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections),
+    selectedSniIds: sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => item.sni_id),
+    selectedTrafficIds: [
+      ...selectedTunnelIdsForRow(row, tunnelSelections).map((id) => `tunnel:${id}`),
+      ...sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => `sni:${item.sni_id}`)
+    ]
   }));
 }
 
@@ -250,6 +300,7 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
   const sourceType = optionalString(body.sourceType ?? body.source_type) || "v2ray_uri";
   const protocol = optionalString(body.protocol) || inferProtocol(rawConfig, sourceType);
   const selectedTunnelIds = selectedTunnelIdsFromBody(body);
+  const selectedSniIds = selectedSniIdsFromBody(body);
   const timestamp = nowIso();
   await run(
     env.DB,
@@ -264,7 +315,7 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
     protocol,
     boolToInt(body.enabled, true),
     body.useTunnel === undefined && body.use_tunnel === undefined
-      ? boolToInt(selectedTunnelIds.length > 0)
+      ? boolToInt(selectedTunnelIds.length > 0 || selectedSniIds.length > 0)
       : boolToInt(body.useTunnel ?? body.use_tunnel),
     selectedTunnelIds[0] || null,
     timestamp,
@@ -284,18 +335,19 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   const candidates = Array.isArray(body.candidates)
     ? normalizeImportCandidates(body.candidates)
     : (await buildImportCandidates(env, body)).candidates;
-  if (candidates.length === 0) throw new HttpError(400, "no import candidates selected");
+  const activeCandidates = candidates.filter((item) => !item.removed);
+  if (activeCandidates.length === 0) throw new HttpError(400, "no import candidates selected");
 
   const remark = optionalString(body.remark);
   const imported: Array<ProxyNodeRow | null> = [];
   const errors: string[] = [];
-  const byId = new Map(candidates.map((item) => [item.id, item]));
+  const byId = new Map(activeCandidates.map((item) => [item.id, item]));
   const seenNames = new Set<string>();
   let skipped = 0;
   let created = 0;
   let updated = 0;
 
-  for (const item of candidates) {
+  for (const item of activeCandidates) {
     const name = item.name.trim();
     if (!name || seenNames.has(name)) {
       skipped += 1;
@@ -357,7 +409,9 @@ interface ImportCandidate {
   transport?: string;
   tls: boolean;
   duplicate: boolean;
+  removed?: boolean;
   parentId?: string;
+  parentName?: string;
 }
 
 async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
@@ -408,6 +462,57 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
   return { candidates, errors };
 }
 
+function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): ImportCandidate[] {
+  const excludeKeywords = stringArray(rules.excludeKeywords ?? rules.exclude_keywords).map((item) => item.toLowerCase());
+  const includeKeywords = stringArray(rules.includeKeywords ?? rules.include_keywords).map((item) => item.toLowerCase());
+  const removedNames = new Set(stringArray(rules.removedNames ?? rules.removed_names));
+  const parentByName = isRecord(rules.parentByName ?? rules.parent_by_name)
+    ? (rules.parentByName ?? rules.parent_by_name) as JsonRecord
+    : {};
+  const byName = new Map(candidates.map((item) => [item.name, item]));
+
+  for (const item of candidates) {
+    const haystack = [item.name, item.protocol, item.server, item.sni, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
+    const includeMatched = includeKeywords.length === 0 || includeKeywords.some((keyword) => haystack.includes(keyword));
+    const excludeMatched = excludeKeywords.some((keyword) => haystack.includes(keyword));
+    item.removed = removedNames.has(item.name) || !includeMatched || excludeMatched;
+  }
+
+  for (const item of candidates) {
+    const parentName = typeof parentByName[item.name] === "string" ? String(parentByName[item.name]) : "";
+    const parent = parentName ? byName.get(parentName) : null;
+    if (parent && !item.removed && !parent.removed) {
+      item.parentName = parent.name;
+      item.parentId = parent.id;
+    }
+  }
+  return candidates;
+}
+
+function importRulesFromBody(body: JsonRecord): JsonRecord {
+  const rules = isRecord(body.rules) ? { ...body.rules } as JsonRecord : {};
+  const excludeKeywords = parseEndpointValues(body.excludeKeywords ?? body.exclude_keywords);
+  const includeKeywords = parseEndpointValues(body.includeKeywords ?? body.include_keywords);
+  if (excludeKeywords.length > 0) rules.excludeKeywords = excludeKeywords;
+  if (includeKeywords.length > 0) rules.includeKeywords = includeKeywords;
+  if (Array.isArray(body.removedNames ?? body.removed_names)) {
+    rules.removedNames = stringArray(body.removedNames ?? body.removed_names);
+  }
+  if (isRecord(body.parentByName ?? body.parent_by_name)) {
+    rules.parentByName = body.parentByName ?? body.parent_by_name;
+  }
+  return rules;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim());
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
   return value
     .filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item)))
@@ -426,9 +531,169 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
         transport: optionalString(item.transport) || undefined,
         tls: Boolean(item.tls),
         duplicate: Boolean(item.duplicate),
+        removed: Boolean(item.removed),
         parentId: optionalString(item.parentId ?? item.parent_id) || undefined
       };
     });
+}
+
+async function listCustomSnis(env: Env): Promise<CustomSniRow[]> {
+  return await all<CustomSniRow>(env.DB, "SELECT * FROM custom_snis ORDER BY sort_order, name");
+}
+
+async function createCustomSni(env: Env, body: JsonRecord): Promise<CustomSniRow | null> {
+  const hostname = requiredString(body.hostname ?? body.value, "hostname");
+  const timestamp = nowIso();
+  const existing = await first<CustomSniRow>(env.DB, "SELECT * FROM custom_snis WHERE hostname = ?", hostname);
+  if (existing) {
+    return await updateCustomSni(env, existing.id, body);
+  }
+  const id = optionalString(body.id) || makeId("sni");
+  await run(
+    env.DB,
+    `INSERT INTO custom_snis (id, name, hostname, remark, enabled, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    id,
+    optionalString(body.name) || hostname,
+    hostname,
+    optionalString(body.remark),
+    boolToInt(body.enabled, true),
+    intOrNull(body.sortOrder ?? body.sort_order) || 0,
+    timestamp,
+    timestamp
+  );
+  return await first<CustomSniRow>(env.DB, "SELECT * FROM custom_snis WHERE id = ?", id);
+}
+
+async function updateCustomSni(env: Env, id: string, body: JsonRecord): Promise<CustomSniRow | null> {
+  const current = await first<CustomSniRow>(env.DB, "SELECT * FROM custom_snis WHERE id = ?", id);
+  if (!current) throw new HttpError(404, "SNI not found");
+  await run(
+    env.DB,
+    `UPDATE custom_snis SET name = ?, hostname = ?, remark = ?, enabled = ?, sort_order = ?, updated_at = ?
+     WHERE id = ?`,
+    optionalString(body.name) || current.name,
+    optionalString(body.hostname ?? body.value) || current.hostname,
+    body.remark === null ? null : optionalString(body.remark) || current.remark,
+    body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
+    intOrNull(body.sortOrder ?? body.sort_order) ?? current.sort_order,
+    nowIso(),
+    id
+  );
+  return await first<CustomSniRow>(env.DB, "SELECT * FROM custom_snis WHERE id = ?", id);
+}
+
+async function listImportSources(env: Env): Promise<unknown[]> {
+  const rows = await all<ImportSourceRow>(env.DB, "SELECT * FROM import_sources ORDER BY updated_at DESC, name");
+  return rows.map((row) => ({
+    ...row,
+    rules: parseJsonObject(row.rules_json)
+  }));
+}
+
+async function createImportSource(env: Env, body: JsonRecord): Promise<ImportSourceRow | null> {
+  const id = optionalString(body.id) || makeId("import");
+  const timestamp = nowIso();
+  const name = requiredString(body.name, "name");
+  const sourceKind = optionalString(body.sourceKind ?? body.source_kind) || "url";
+  if (sourceKind !== "url" && sourceKind !== "content") throw new HttpError(400, "sourceKind must be url or content");
+  await run(
+    env.DB,
+    `INSERT INTO import_sources
+      (id, name, source_kind, url, content, name_prefix, enabled, rules_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    id,
+    name,
+    sourceKind,
+    optionalString(body.url),
+    optionalString(body.content),
+    optionalString(body.namePrefix ?? body.name_prefix),
+    boolToInt(body.enabled, true),
+    safeJson(importRulesFromBody(body)),
+    timestamp,
+    timestamp
+  );
+  return await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
+}
+
+async function updateImportSource(env: Env, id: string, body: JsonRecord): Promise<ImportSourceRow | null> {
+  const current = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
+  if (!current) throw new HttpError(404, "import source not found");
+  const sourceKind = optionalString(body.sourceKind ?? body.source_kind) || current.source_kind;
+  if (sourceKind !== "url" && sourceKind !== "content") throw new HttpError(400, "sourceKind must be url or content");
+  const rules = body.rules === undefined
+    && body.excludeKeywords === undefined && body.exclude_keywords === undefined
+    && body.includeKeywords === undefined && body.include_keywords === undefined
+    && body.removedNames === undefined && body.removed_names === undefined
+    && body.parentByName === undefined && body.parent_by_name === undefined
+    ? parseJsonObject(current.rules_json)
+    : importRulesFromBody(body);
+  await run(
+    env.DB,
+    `UPDATE import_sources SET name = ?, source_kind = ?, url = ?, content = ?, name_prefix = ?,
+      enabled = ?, rules_json = ?, updated_at = ?
+     WHERE id = ?`,
+    optionalString(body.name) || current.name,
+    sourceKind,
+    body.url === null ? null : optionalString(body.url) || current.url,
+    body.content === null ? null : optionalString(body.content) || current.content,
+    body.namePrefix === null || body.name_prefix === null
+      ? null
+      : optionalString(body.namePrefix ?? body.name_prefix) || current.name_prefix,
+    body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
+    safeJson(rules),
+    nowIso(),
+    id
+  );
+  return await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
+}
+
+async function previewImportSource(env: Env, id: string): Promise<{ candidates: ImportCandidate[]; errors: string[] }> {
+  const source = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
+  if (!source) throw new HttpError(404, "import source not found");
+  const built = await buildImportCandidates(env, importSourceBody(source));
+  return { ...built, candidates: applyImportRules(built.candidates, parseJsonObject(source.rules_json)) };
+}
+
+async function refreshImportSource(env: Env, id: string): Promise<unknown> {
+  const source = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
+  if (!source) throw new HttpError(404, "import source not found");
+  try {
+    const preview = await previewImportSource(env, id);
+    const result = await importProxyNodes(env, {
+      candidates: preview.candidates as unknown as JsonValue,
+      remark: source.name,
+      enabled: true
+    });
+    await run(
+      env.DB,
+      "UPDATE import_sources SET last_fetched_at = ?, last_imported_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+      nowIso(),
+      nowIso(),
+      nowIso(),
+      id
+    );
+    return { ...result, errors: [...preview.errors, ...result.errors] };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "refresh failed";
+    await run(env.DB, "UPDATE import_sources SET last_error = ?, updated_at = ? WHERE id = ?", message, nowIso(), id);
+    throw error;
+  }
+}
+
+function importSourceBody(source: ImportSourceRow): JsonRecord {
+  if (source.source_kind === "content") {
+    return {
+      content: source.content || "",
+      sourceName: source.name,
+      namePrefix: source.name_prefix || ""
+    };
+  }
+  return {
+    urls: source.url || "",
+    sourceName: source.name,
+    namePrefix: source.name_prefix || ""
+  };
 }
 
 async function upsertProxyNodeByName(env: Env, body: JsonRecord): Promise<{ row: ProxyNodeRow | null; created: boolean }> {
@@ -477,6 +742,7 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     body.useTunnel === undefined && body.use_tunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel ?? body.use_tunnel),
     body.selectedTunnelIds === undefined && body.selected_tunnel_ids === undefined
+      && body.selectedTrafficIds === undefined && body.selected_traffic_ids === undefined
       && body.selectedTunnelId === undefined && body.selected_tunnel_id === undefined
       ? current.selected_tunnel_id
       : firstSelectedTunnelId(body),
@@ -510,6 +776,7 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
     }
   }
   if (Array.isArray(body.selectedTunnelIds) || Array.isArray(body.selected_tunnel_ids)
+    || Array.isArray(body.selectedTrafficIds) || Array.isArray(body.selected_traffic_ids)
     || body.selectedTunnelId !== undefined || body.selected_tunnel_id !== undefined) {
     const tunnelIds = selectedTunnelIdsFromBody(body);
     await run(env.DB, "DELETE FROM proxy_node_tunnel_selections WHERE proxy_node_id = ?", nodeId);
@@ -522,6 +789,19 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       );
     }
   }
+  if (Array.isArray(body.selectedSniIds) || Array.isArray(body.selected_sni_ids)
+    || Array.isArray(body.selectedTrafficIds) || Array.isArray(body.selected_traffic_ids)) {
+    const sniIds = selectedSniIdsFromBody(body);
+    await run(env.DB, "DELETE FROM proxy_node_sni_selections WHERE proxy_node_id = ?", nodeId);
+    for (const sniId of sniIds) {
+      await run(
+        env.DB,
+        "INSERT OR REPLACE INTO proxy_node_sni_selections (proxy_node_id, sni_id, enabled) VALUES (?, ?, 1)",
+        nodeId,
+        sniId
+      );
+    }
+  }
 }
 
 function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
@@ -529,8 +809,30 @@ function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
   const ids = Array.isArray(raw)
     ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
     : [];
+  const traffic = body.selectedTrafficIds ?? body.selected_traffic_ids;
+  if (Array.isArray(traffic)) {
+    ids.push(...traffic
+      .filter((id): id is string => typeof id === "string" && id.startsWith("tunnel:"))
+      .map((id) => id.slice("tunnel:".length).trim())
+      .filter(Boolean));
+  }
   const single = optionalString(body.selectedTunnelId ?? body.selected_tunnel_id);
   if (single) ids.unshift(single);
+  return Array.from(new Set(ids));
+}
+
+function selectedSniIdsFromBody(body: JsonRecord): string[] {
+  const raw = body.selectedSniIds ?? body.selected_sni_ids;
+  const ids = Array.isArray(raw)
+    ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
+    : [];
+  const traffic = body.selectedTrafficIds ?? body.selected_traffic_ids;
+  if (Array.isArray(traffic)) {
+    ids.push(...traffic
+      .filter((id): id is string => typeof id === "string" && id.startsWith("sni:"))
+      .map((id) => id.slice("sni:".length).trim())
+      .filter(Boolean));
+  }
   return Array.from(new Set(ids));
 }
 
