@@ -160,9 +160,19 @@ export function renderAdminUi(env: Env): string {
     .group-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .group-chip { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 8px; color: var(--accent-2); background: rgba(96, 165, 250, 0.1); font-size: 12px; max-width: 280px; }
     .group-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .import-review { display: grid; gap: 10px; margin-top: 12px; }
+    .import-list { display: grid; gap: 7px; }
+    .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 250px) auto; gap: 8px; align-items: center; }
+    .import-row.child { padding-left: 28px; border-left: 2px solid var(--selected); }
+    .import-node { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 9px; }
+    .import-node.carrier { border-color: #fb923c; background: var(--selected-soft); }
+    .import-node.removed { opacity: 0.64; }
+    .import-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .import-node .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .import-node .dup { color: var(--warn); font-size: 12px; white-space: nowrap; }
     @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
-      .tokenbar, .metrics, .formgrid, .split, .binding-grid { grid-template-columns: 1fr; }
+      .tokenbar, .metrics, .formgrid, .split, .binding-grid, .import-row { grid-template-columns: 1fr; }
       .chip-row { grid-template-columns: 1fr; }
       .formgrid .wide { grid-column: span 1; }
       th { position: static; }
@@ -231,7 +241,21 @@ export function renderAdminUi(env: Env): string {
               <label class="wide">Subscription URLs<textarea id="importUrls" placeholder="https://example.com/sub.txt"></textarea></label>
               <label class="wide">Paste Content<textarea id="importContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
               <label>Name Prefix<input id="importPrefix" placeholder="optional"></label>
-              <div class="actions"><button id="importSubscription" class="primary">Import Nodes</button></div>
+              <div class="actions"><button id="previewImport" class="primary">Preview Import</button><button id="commitImport">Commit Selected</button></div>
+              <label class="wide">Keyword Filter<input id="importFilterText" placeholder="hk, test, expire"></label>
+              <label>Filter Mode<select id="importFilterMode"><option value="exclude">Move matching to unused</option><option value="include">Keep only matching</option></select></label>
+              <div class="actions"><button id="applyImportFilter" class="subtle">Apply Filter</button><button id="clearImportReview" class="subtle">Clear Preview</button></div>
+            </div>
+            <div id="importReview" class="import-review hidden">
+              <div class="toolbar"><h3>Import Review</h3><div class="small muted"><span id="importActiveCount" class="count">0</span> selected / <span id="importRemovedCount" class="count">0</span> unused</div></div>
+              <div class="subpanel">
+                <div class="toolbar"><h3>Selected Nodes</h3><span class="small muted">Choose a TLS carrier for HTTP/content nodes before commit.</span></div>
+                <div id="importActiveList" class="import-list"></div>
+              </div>
+              <div class="subpanel">
+                <div class="toolbar"><h3>Unused Nodes</h3><span class="small muted">Removed before saving.</span></div>
+                <div id="importRemovedList" class="import-list"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -336,7 +360,7 @@ export function renderAdminUi(env: Env): string {
 
   <script>
     const BASE_URL = ${JSON.stringify(baseUrl)};
-    const state = { overview: null, tunnels: [], nodes: [], endpoints: [], groups: [], generatedNodes: [] };
+    const state = { overview: null, tunnels: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importCandidates: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
     let editingGroupId = null;
@@ -545,6 +569,66 @@ export function renderAdminUi(env: Env): string {
       ];
       subscriptionLinks.innerHTML = rows.map(([name, url]) => '<tr><th>' + name + '</th><td class="mono">' + esc(url) + '</td><td><button data-copy="' + esc(url) + '">Copy</button></td></tr>').join('');
     }
+    function renderImportReview() {
+      const review = byId('importReview');
+      const active = state.importCandidates.filter((item) => !item.removed);
+      const removed = state.importCandidates.filter((item) => item.removed);
+      review.classList.toggle('hidden', state.importCandidates.length === 0);
+      byId('importActiveCount').textContent = String(active.length);
+      byId('importRemovedCount').textContent = String(removed.length);
+      byId('importActiveList').innerHTML = orderedImportCandidates(active).map((item) => importRowHtml(item, active)).join('') || '<div class="muted small">No selected nodes.</div>';
+      byId('importRemovedList').innerHTML = removed.map((item) => importRemovedRowHtml(item)).join('') || '<div class="muted small">No unused nodes.</div>';
+    }
+    function orderedImportCandidates(active) {
+      const activeIds = new Set(active.map((item) => item.id));
+      const childrenByParent = new Map();
+      active.forEach((item) => {
+        if (item.parentId && activeIds.has(item.parentId)) {
+          const children = childrenByParent.get(item.parentId) || [];
+          children.push(item);
+          childrenByParent.set(item.parentId, children);
+        }
+      });
+      const output = [];
+      active.forEach((item) => {
+        if (item.parentId && activeIds.has(item.parentId)) return;
+        output.push(item);
+        (childrenByParent.get(item.id) || []).forEach((child) => output.push(child));
+      });
+      return output;
+    }
+    function importRowHtml(item, active) {
+      const carriers = active.filter((candidate) => candidate.tls && candidate.id !== item.id);
+      const hasParent = Boolean(item.parentId && carriers.some((candidate) => candidate.id === item.parentId));
+      const parentOptions = '<option value="">No TLS carrier</option>' + carriers.map((candidate) =>
+        '<option value="' + esc(candidate.id) + '"' + (candidate.id === item.parentId ? ' selected' : '') + '>' + esc(candidate.name) + '</option>'
+      ).join('');
+      const meta = [item.protocol, item.transport, item.server ? item.server + (item.port ? ':' + item.port : '') : null].filter(Boolean).join(' / ');
+      return '<div class="import-row' + (hasParent ? ' child' : '') + '">' +
+        '<div class="import-node' + (item.tls ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
+          '<strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span>' +
+          (item.duplicate ? '<span class="dup">will update existing</span>' : '') +
+        '</div>' +
+        '<select data-import-parent="' + esc(item.id) + '">' + parentOptions + '</select>' +
+        '<button data-remove-import="' + esc(item.id) + '" class="subtle">Remove</button>' +
+      '</div>';
+    }
+    function importRemovedRowHtml(item) {
+      const meta = [item.protocol, item.server ? item.server + (item.port ? ':' + item.port : '') : null].filter(Boolean).join(' / ');
+      return '<div class="import-row"><div class="import-node removed"><strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span></div><span></span><button data-restore-import="' + esc(item.id) + '">Restore</button></div>';
+    }
+    function importKeywords() {
+      return byId('importFilterText').value.split(/[\s,，;；]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+    }
+    function importSearchText(item) {
+      return [item.name, item.protocol, item.server, item.sni, item.transport, item.sourceName].filter(Boolean).join(' ').toLowerCase();
+    }
+    function activeImportCandidatesForCommit() {
+      const activeIds = new Set(state.importCandidates.filter((item) => !item.removed).map((item) => item.id));
+      return state.importCandidates
+        .filter((item) => !item.removed)
+        .map((item) => ({ ...item, parentId: activeIds.has(item.parentId) ? item.parentId : '' }));
+    }
 
     function resetNodeSourceForm() {
       editingNodeId = null;
@@ -635,6 +719,13 @@ export function renderAdminUi(env: Env): string {
     document.body.addEventListener('change', (e) => {
       const t = e.target;
       if (t && t.id === 'bindingNodes') updateBindingSelectedCount();
+      if (t && t.dataset && t.dataset.importParent) {
+        const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.importParent);
+        if (item) {
+          item.parentId = t.value || '';
+          renderImportReview();
+        }
+      }
     });
 
     document.body.addEventListener('click', async (e) => {
@@ -654,6 +745,23 @@ export function renderAdminUi(env: Env): string {
         if (t.dataset.derivedId) {
           t.classList.toggle('selected');
           updateGroupSelectedCount();
+        }
+        if (t.dataset.removeImport) {
+          const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.removeImport);
+          if (item) {
+            item.removed = true;
+            state.importCandidates.forEach((candidate) => {
+              if (candidate.parentId === item.id) candidate.parentId = '';
+            });
+            renderImportReview();
+          }
+        }
+        if (t.dataset.restoreImport) {
+          const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.restoreImport);
+          if (item) {
+            item.removed = false;
+            renderImportReview();
+          }
         }
         if (t.dataset.restart) {
           await api('/api/admin/tunnels/' + t.dataset.restart + '/restart', { method: 'POST', body: '{}' });
@@ -751,20 +859,60 @@ export function renderAdminUi(env: Env): string {
         setNotice(formatError(err), 'error');
       }
     };
-    byId('importSubscription').onclick = async () => {
+    byId('previewImport').onclick = async () => {
       try {
-        const data = await api('/api/admin/proxy-nodes/import-subscription', {
+        const data = await api('/api/admin/proxy-nodes/import-preview', {
           method: 'POST',
           body: JSON.stringify({
             urls: byId('importUrls').value,
             content: byId('importContent').value,
-            namePrefix: byId('importPrefix').value,
-            enabled: true
+            namePrefix: byId('importPrefix').value
           })
         });
+        state.importCandidates = (data.candidates || []).map((item) => ({ ...item, removed: false, parentId: '' }));
+        renderImportReview();
+        setNotice('Preview loaded ' + state.importCandidates.length + ' candidate node(s)' + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , state.importCandidates.length ? 'ok' : 'warn');
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
+    byId('applyImportFilter').onclick = () => {
+      const keywords = importKeywords();
+      if (keywords.length === 0) {
+        setNotice('Enter one or more keywords before applying import filter.', 'warn');
+        return;
+      }
+      const include = byId('importFilterMode').value === 'include';
+      state.importCandidates.forEach((item) => {
+        const matched = keywords.some((keyword) => importSearchText(item).includes(keyword));
+        item.removed = include ? !matched : matched;
+        if (item.removed) {
+          state.importCandidates.forEach((candidate) => {
+            if (candidate.parentId === item.id) candidate.parentId = '';
+          });
+        }
+      });
+      renderImportReview();
+      setNotice('Import filter applied.', 'ok');
+    };
+    byId('clearImportReview').onclick = () => {
+      state.importCandidates = [];
+      renderImportReview();
+      setNotice('Import preview cleared.', 'warn');
+    };
+    byId('commitImport').onclick = async () => {
+      try {
+        const candidates = activeImportCandidatesForCommit();
+        if (candidates.length === 0) throw new Error('No selected import candidates.');
+        const data = await api('/api/admin/proxy-nodes/import-subscription', {
+          method: 'POST',
+          body: JSON.stringify({ candidates, enabled: true })
+        });
+        state.importCandidates = [];
+        renderImportReview();
         byId('importUrls').value = '';
         byId('importContent').value = '';
-        setNotice('Imported ' + data.imported + ' nodes' + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , data.imported ? 'ok' : 'warn');
+        setNotice('Imported ' + data.imported + ' new, updated ' + data.updated + ', skipped ' + data.skipped + (data.errors && data.errors.length ? '; ' + data.errors.join('; ') : '.') , data.imported || data.updated ? 'ok' : 'warn');
         await refreshNodes();
         await refreshGeneratedNodes();
       } catch (err) {

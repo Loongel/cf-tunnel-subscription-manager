@@ -1,7 +1,12 @@
 import { requireAdmin } from "./auth";
 import { all, first, run } from "./db";
 import { queueRestartCommand } from "./cron";
-import { parseEndpointValues, parseProxySubscriptionContent, type ParsedProxyNode } from "./importers";
+import {
+  composeFallbackRawConfig,
+  parseEndpointValues,
+  parseProxySubscriptionContent,
+  type ParsedProxyNode
+} from "./importers";
 import { inferProtocol } from "./protocols";
 import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from "./settings";
 import { listGeneratedNodes, parseSubscriptionOptions, previewSubscription } from "./subscriptions";
@@ -80,6 +85,10 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 
   if (request.method === "POST" && path === "/api/admin/proxy-nodes/import-subscription") {
     return json(await importProxyNodes(env, await readJson(request)), { status: 201 });
+  }
+
+  if (request.method === "POST" && path === "/api/admin/proxy-nodes/import-preview") {
+    return json(await previewProxyNodeImport(env, await readJson(request)));
   }
 
   const proxyNodeMatch = /^\/api\/admin\/proxy-nodes\/([^/]+)$/.exec(path);
@@ -267,20 +276,104 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
 
 async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   imported: number;
+  updated: number;
   skipped: number;
   proxyNodes: Array<ProxyNodeRow | null>;
   errors: string[];
 }> {
-  const sources = await readImportSources(body);
-  if (sources.length === 0) throw new HttpError(400, "subscription URL or content is required");
+  const candidates = Array.isArray(body.candidates)
+    ? normalizeImportCandidates(body.candidates)
+    : (await buildImportCandidates(env, body)).candidates;
+  if (candidates.length === 0) throw new HttpError(400, "no import candidates selected");
 
-  const namePrefix = optionalString(body.namePrefix ?? body.name_prefix);
   const remark = optionalString(body.remark);
   const imported: Array<ProxyNodeRow | null> = [];
   const errors: string[] = [];
+  const byId = new Map(candidates.map((item) => [item.id, item]));
+  const seenNames = new Set<string>();
   let skipped = 0;
+  let created = 0;
+  let updated = 0;
 
-  for (const source of sources) {
+  for (const item of candidates) {
+    const name = item.name.trim();
+    if (!name || seenNames.has(name)) {
+      skipped += 1;
+      continue;
+    }
+    seenNames.add(name);
+
+    let rawConfig = item.rawConfig;
+    if (item.parentId) {
+      const carrier = byId.get(item.parentId);
+      if (!carrier) {
+        skipped += 1;
+        errors.push(`${item.name}: selected TLS carrier not found`);
+        continue;
+      }
+      rawConfig = composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType);
+    }
+
+    try {
+      const result = await upsertProxyNodeByName(env, {
+        name,
+        remark: remark || item.sourceName,
+        rawConfig,
+        sourceType: item.sourceType,
+        protocol: item.protocol,
+        enabled: body.enabled === undefined ? true : body.enabled,
+        useTunnel: false,
+        selectedEndpointIds: []
+      });
+      imported.push(result.row);
+      if (result.created) created += 1;
+      else updated += 1;
+    } catch (error) {
+      skipped += 1;
+      errors.push(`${item.name}: ${error instanceof Error ? error.message : "import failed"}`);
+    }
+  }
+
+  return { imported: created, updated, skipped, proxyNodes: imported, errors };
+}
+
+async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
+  candidates: ImportCandidate[];
+  errors: string[];
+}> {
+  return await buildImportCandidates(env, body);
+}
+
+interface ImportCandidate {
+  id: string;
+  name: string;
+  sourceName: string;
+  rawConfig: string;
+  sourceType: "v2ray_uri" | "sing_box_outbound";
+  protocol: string;
+  server?: string;
+  port?: string;
+  sni?: string;
+  transport?: string;
+  tls: boolean;
+  duplicate: boolean;
+  parentId?: string;
+}
+
+async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
+  candidates: ImportCandidate[];
+  errors: string[];
+}> {
+  const sources = await readImportSources(body);
+  if (sources.length === 0) throw new HttpError(400, "subscription URL or content is required");
+  const namePrefix = optionalString(body.namePrefix ?? body.name_prefix);
+  const existing = await all<{ name: string }>(env.DB, "SELECT name FROM proxy_nodes");
+  const existingNames = new Set(existing.map((row) => row.name));
+  const candidates: ImportCandidate[] = [];
+  const errors: string[] = [];
+
+  for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+    const source = sources[sourceIndex];
     let parsed: ParsedProxyNode[];
     try {
       parsed = parseProxySubscriptionContent(source.content, source.name);
@@ -289,26 +382,62 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       continue;
     }
     if (parsed.length === 0) {
-      skipped += 1;
       errors.push(`${source.name}: no supported proxy nodes found`);
       continue;
     }
 
-    for (const item of parsed) {
-      imported.push(await createProxyNode(env, {
-        name: namePrefix ? `${namePrefix} ${item.name}` : item.name,
-        remark: remark || source.name,
+    parsed.forEach((item, itemIndex) => {
+      const name = namePrefix ? `${namePrefix} ${item.name}` : item.name;
+      candidates.push({
+        id: `candidate_${sourceIndex}_${itemIndex}`,
+        name,
+        sourceName: source.name,
         rawConfig: item.rawConfig,
         sourceType: item.sourceType,
         protocol: item.protocol,
-        enabled: body.enabled === undefined ? true : body.enabled,
-        useTunnel: false,
-        selectedEndpointIds: []
-      }));
-    }
+        server: item.server,
+        port: item.port,
+        sni: item.sni,
+        transport: item.transport,
+        tls: item.tls,
+        duplicate: existingNames.has(name)
+      });
+    });
   }
 
-  return { imported: imported.length, skipped, proxyNodes: imported, errors };
+  return { candidates, errors };
+}
+
+function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
+  return value
+    .filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .map((item, index) => {
+      const sourceType = optionalString(item.sourceType ?? item.source_type) === "sing_box_outbound" ? "sing_box_outbound" : "v2ray_uri";
+      return {
+        id: optionalString(item.id) || `candidate_${index}`,
+        name: requiredString(item.name, "candidate.name"),
+        sourceName: optionalString(item.sourceName ?? item.source_name) || "import",
+        rawConfig: requiredString(item.rawConfig ?? item.raw_config, "candidate.rawConfig"),
+        sourceType,
+        protocol: optionalString(item.protocol) || inferProtocol(requiredString(item.rawConfig ?? item.raw_config, "candidate.rawConfig"), sourceType),
+        server: optionalString(item.server) || undefined,
+        port: optionalString(item.port) || undefined,
+        sni: optionalString(item.sni) || undefined,
+        transport: optionalString(item.transport) || undefined,
+        tls: Boolean(item.tls),
+        duplicate: Boolean(item.duplicate),
+        parentId: optionalString(item.parentId ?? item.parent_id) || undefined
+      };
+    });
+}
+
+async function upsertProxyNodeByName(env: Env, body: JsonRecord): Promise<{ row: ProxyNodeRow | null; created: boolean }> {
+  const name = requiredString(body.name, "name");
+  const existing = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE name = ? ORDER BY updated_at DESC LIMIT 1", name);
+  if (existing) {
+    return { row: await updateProxyNode(env, existing.id, body), created: false };
+  }
+  return { row: await createProxyNode(env, body), created: true };
 }
 
 async function readImportSources(body: JsonRecord): Promise<Array<{ name: string; content: string }>> {

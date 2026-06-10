@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEndpointValues, parseProxySubscriptionContent } from "../src/importers";
+import { composeFallbackRawConfig, parseEndpointValues, parseProxySubscriptionContent } from "../src/importers";
 import { encodeBase64, mutateShareUri } from "../src/protocols";
 import { subscriptionUrls } from "../src/settings";
 import type { PreferredEndpointRow, ProxyNodeRow } from "../src/types";
@@ -122,5 +122,18 @@ describe("protocol adapter", () => {
     }));
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({ name: "edge-a", sourceType: "sing_box_outbound", protocol: "sing-box" });
+  });
+
+  it("composes HTTP content nodes under a TLS carrier before import", () => {
+    const carrier = "vless://carrier@example.com:443?type=ws&security=tls&sni=edge.example.com#carrier";
+    const child = "vless://child@origin.example.net:80?type=ws&path=%2Fapp#content";
+    const composed = composeFallbackRawConfig(child, "v2ray_uri", carrier, "v2ray_uri");
+    const parsed = new URL(composed);
+    expect(parsed.hostname).toBe("example.com");
+    expect(parsed.port).toBe("443");
+    expect(parsed.searchParams.get("security")).toBe("tls");
+    expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
+    expect(parsed.searchParams.get("host")).toBe("edge.example.com");
+    expect(parsed.searchParams.get("path")).toBe("/app");
   });
 });
