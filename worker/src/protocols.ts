@@ -69,7 +69,7 @@ function mutateUrlUri(raw: string, ctx: MutationContext): string {
   url.hostname = server;
   url.port = targetPort(url.port, ctx);
   url.hash = `#${encodeURIComponent(displayName(ctx.node, ctx.endpoint))}`;
-  if (ctx.node.use_tunnel && ctx.tunnelHost) {
+  if (ctx.tunnelHost) {
     const keys = ["sni", "peer"];
     for (const key of keys) {
       if (url.searchParams.has(key) || key === "sni") url.searchParams.set(key, host);
@@ -94,7 +94,7 @@ function mutateVmess(raw: string, ctx: MutationContext): string {
   parsed.add = server;
   parsed.port = targetPort(typeof parsed.port === "string" || typeof parsed.port === "number" ? String(parsed.port) : null, ctx);
   parsed.ps = displayName(ctx.node, ctx.endpoint);
-  if (ctx.node.use_tunnel && ctx.tunnelHost) {
+  if (ctx.tunnelHost) {
     parsed.sni = host;
     parsed.host = host;
   }
@@ -120,7 +120,7 @@ function parseShadowsocks(raw: string, ctx: MutationContext): string {
   url.hostname = server;
   url.port = targetPort(url.port, ctx);
   const params = url.searchParams;
-  if (ctx.node.use_tunnel && ctx.tunnelHost && params.has("plugin")) {
+  if (ctx.tunnelHost && params.has("plugin")) {
     const plugin = params.get("plugin") || "";
     if (!/host=/i.test(plugin)) {
       params.set("plugin", `${plugin};host=${ctx.tunnelHost}`);
@@ -221,7 +221,7 @@ function mutateOutboundObject(raw: JsonRecord, ctx: MutationContext): JsonRecord
     ctx
   ));
   output.tag = displayName(ctx.node, ctx.endpoint);
-  if (ctx.node.use_tunnel && ctx.tunnelHost) {
+  if (ctx.tunnelHost) {
     const tls = typeof output.tls === "object" && output.tls !== null && !Array.isArray(output.tls)
       ? (output.tls as JsonRecord)
       : {};

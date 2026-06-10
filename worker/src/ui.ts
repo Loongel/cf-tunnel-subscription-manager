@@ -611,8 +611,8 @@ export function renderAdminUi(env: Env): string {
           ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
           ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
         ];
-        const path = row.use_tunnel && trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
-        const endpointText = row.use_tunnel ? globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional' : 'Direct';
+        const path = trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
+        const endpointText = globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional';
         return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
     }
@@ -676,7 +676,11 @@ export function renderAdminUi(env: Env): string {
     function renderBindingNodeList() {
       const selected = new Set(selectedBindingNodeIds().filter((id) => state.nodes.some((node) => node.id === id)));
       byId('bindingNodes').innerHTML = state.nodes.map((n) => {
-        const traffic = n.use_tunnel ? 'tunnel' : 'direct';
+        const trafficIds = n.selectedTrafficIds || [
+          ...(n.selectedTunnelIds || (n.selected_tunnel_id ? [n.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
+          ...(n.selectedSniIds || []).map((id) => 'sni:' + id)
+        ];
+        const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
         return '<option value="' + esc(n.id) + '">' + esc(n.name + ' / ' + n.protocol + ' / ' + traffic) + '</option>';
       }).join('');
       markSelected(byId('bindingNodes'), Array.from(selected));
@@ -690,8 +694,8 @@ export function renderAdminUi(env: Env): string {
         ...(node.selectedTunnelIds || (node.selected_tunnel_id ? [node.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
         ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
       ];
-      const traffic = node.use_tunnel && trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
-      const endpoints = node.use_tunnel ? globalEndpointCount() + '+' + ((node.selectedEndpointIds || []).length) : 'direct';
+      const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
+      const endpoints = globalEndpointCount() + '+' + ((node.selectedEndpointIds || []).length);
       return '<label class="binding-row' + (selected ? ' selected' : '') + '">' +
         '<input type="checkbox" data-binding-node-id="' + esc(node.id) + '"' + (selected ? ' checked' : '') + '>' +
         '<span class="binding-row-main"><strong>' + esc(node.name) + '</strong><span>' + esc(node.remark || node.protocol || '') + '</span></span>' +
@@ -707,8 +711,8 @@ export function renderAdminUi(env: Env): string {
           ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
         ];
         if (mode === 'enabled' && !node.enabled) return false;
-        if (mode === 'direct' && node.use_tunnel && trafficIds.length > 0) return false;
-        if (mode === 'traffic' && (!node.use_tunnel || trafficIds.length === 0)) return false;
+        if (mode === 'direct' && trafficIds.length > 0) return false;
+        if (mode === 'traffic' && trafficIds.length === 0) return false;
         if (!query) return true;
         return [node.name, node.remark, node.protocol].filter(Boolean).join(' ').toLowerCase().includes(query);
       });
@@ -763,13 +767,13 @@ export function renderAdminUi(env: Env): string {
       const query = filterText('savedGroupFilter');
       const mode = byId('savedGroupMode').value;
       const rows = state.groups.filter((row) => {
-        const ids = row.derivedNodeIds || [];
+        const ids = groupDisplayIds(row);
         if (mode === 'nonempty' && ids.length === 0) return false;
         if (!query) return true;
         return [row.name, ...ids.map((id) => generatedLabel(id))].join(' ').toLowerCase().includes(query);
       });
       groupsBody.innerHTML = rows.map((row) => {
-        const ids = row.derivedNodeIds || [];
+        const ids = groupDisplayIds(row);
         return '<tr><td>' + esc(row.name) + '</td><td>' + esc(ids.length) + '</td><td>' + groupChipsHtml(ids) + '</td><td class="row-actions"><button data-edit-group="' + esc(row.id) + '">Edit</button><button data-delete-group="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="4" class="muted">No groups.</td></tr>';
     }
@@ -977,7 +981,7 @@ export function renderAdminUi(env: Env): string {
         ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
         ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
       ];
-      markSelected(byId('bindingTraffic'), row.use_tunnel ? traffic : []);
+      markSelected(byId('bindingTraffic'), traffic);
       markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
     }
     function loadNodeForEditing(row) {
@@ -993,6 +997,11 @@ export function renderAdminUi(env: Env): string {
       const item = state.generatedNodes.find((node) => node.id === id);
       if (!item) return id;
       return item.sourceName + ' / ' + derivedFullLabel(item);
+    }
+    function groupDisplayIds(row) {
+      return (row.effectiveDerivedNodeIds && row.effectiveDerivedNodeIds.length > 0)
+        ? row.effectiveDerivedNodeIds
+        : (row.derivedNodeIds || []);
     }
     function derivedFullLabel(item) {
       const parts = [];
@@ -1202,7 +1211,7 @@ export function renderAdminUi(env: Env): string {
             editingGroupId = row.id;
             byId('createGroup').textContent = 'Update Group';
             byId('groupName').value = row.name || '';
-            markDerivedCandidates(row.derivedNodeIds || []);
+            markDerivedCandidates(groupDisplayIds(row));
           }
         }
         if (t.dataset.deleteGroup) {

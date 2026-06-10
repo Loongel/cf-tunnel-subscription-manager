@@ -1018,10 +1018,44 @@ async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRec
 
 async function listGroups(env: Env): Promise<unknown[]> {
   const groups = await all<Record<string, unknown>>(env.DB, "SELECT * FROM groups ORDER BY sort_order, name");
+  const generated = await listGeneratedNodes(env, {
+    format: "v2ray",
+    group: null,
+    includeDisabled: false,
+    endpointMode: "selected"
+  });
   return groups.map((group) => ({
     ...group,
-    derivedNodeIds: derivedNodeIdsFromFilter(String(group.endpoint_filter_json || "{}"))
+    ...resolveGroupDerivedIds(derivedNodeIdsFromFilter(String(group.endpoint_filter_json || "{}")), generated)
   }));
+}
+
+function resolveGroupDerivedIds(
+  savedIds: string[],
+  generated: Array<{ id: string; sourceNodeId: string }>
+): { derivedNodeIds: string[]; effectiveDerivedNodeIds: string[]; staleDerivedNodeIds: string[] } {
+  const currentIds = new Set(generated.map((item) => item.id));
+  const exact = savedIds.filter((id) => currentIds.has(id));
+  if (exact.length > 0 || savedIds.length === 0) {
+    return {
+      derivedNodeIds: savedIds,
+      effectiveDerivedNodeIds: exact,
+      staleDerivedNodeIds: savedIds.filter((id) => !currentIds.has(id))
+    };
+  }
+
+  const sourceNodeIds = new Set(savedIds.map(sourceNodeIdFromGeneratedId).filter((id): id is string => Boolean(id)));
+  const fallback = generated.filter((item) => sourceNodeIds.has(item.sourceNodeId)).map((item) => item.id);
+  return {
+    derivedNodeIds: savedIds,
+    effectiveDerivedNodeIds: fallback,
+    staleDerivedNodeIds: savedIds
+  };
+}
+
+function sourceNodeIdFromGeneratedId(id: string): string | null {
+  const match = /^(node_[^:]+):/.exec(id);
+  return match ? match[1] : null;
 }
 
 async function createGroup(env: Env, body: JsonRecord): Promise<unknown> {

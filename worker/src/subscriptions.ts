@@ -28,6 +28,12 @@ interface GroupRow {
   enabled: number;
 }
 
+interface GroupFilter {
+  exists: boolean;
+  derivedIds: Set<string>;
+  sourceNodeIds: Set<string>;
+}
+
 const VALID_ENDPOINT_MODES = new Set(["selected", "ip", "domain", "all", "none"]);
 
 export function parseSubscriptionOptions(format: string, url: URL): SubscriptionOptions {
@@ -169,7 +175,8 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
   for (const node of nodes) {
     const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
 
-    if (!node.use_tunnel) {
+    const selectedTraffic = selectedTrafficForNode(node, tunnelsByNode, snisByNode);
+    if (selectedTraffic.length === 0) {
       if (selected.length === 0) {
         output.push(generateOne(node, null, null, null, null, effectiveOptions));
       } else {
@@ -177,12 +184,6 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
           output.push(generateOne(node, null, null, null, endpoint, effectiveOptions));
         }
       }
-      continue;
-    }
-
-    const selectedTraffic = selectedTrafficForNode(node, tunnelsByNode, snisByNode);
-    if (selectedTraffic.length === 0) {
-      output.push(generateOne(node, null, null, null, null, effectiveOptions));
       continue;
     }
 
@@ -210,8 +211,10 @@ function selectedTrafficForNode(
   snisByNode: Map<string, SniSelectionRow[]>
 ): Array<{ id: string; sniId?: string; hostname: string | null }> {
   const output: Array<{ id: string; sniId?: string; hostname: string | null }> = [];
-  for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
-    output.push({ id: tunnel.tunnel_id, hostname: tunnel.public_hostname });
+  if (node.use_tunnel) {
+    for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
+      output.push({ id: tunnel.tunnel_id, hostname: tunnel.public_hostname });
+    }
   }
   for (const sni of snisByNode.get(node.id) || []) {
     output.push({ id: `sni:${sni.sni_id}`, sniId: sni.sni_id, hostname: sni.hostname });
@@ -250,31 +253,40 @@ async function withGroupDefaults(env: Env, options: SubscriptionOptions): Promis
 async function loadGroupFilter(
   env: Env,
   groupName: string | null | undefined
-): Promise<{ exists: boolean; derivedIds: Set<string> } | null> {
+): Promise<GroupFilter | null> {
   if (!groupName) return null;
   const group = await first<GroupRow>(
     env.DB,
     "SELECT endpoint_mode, endpoint_filter_json, enabled FROM groups WHERE name = ? AND enabled = 1",
     groupName
   );
-  if (!group) return { exists: false, derivedIds: new Set() };
+  if (!group) return { exists: false, derivedIds: new Set(), sourceNodeIds: new Set() };
 
   const filter = parseJsonObject(group.endpoint_filter_json);
+  const derivedIds = Array.isArray(filter.derivedNodeIds)
+    ? filter.derivedNodeIds.filter((id): id is string => typeof id === "string")
+    : [];
   return {
     exists: true,
-    derivedIds: new Set(Array.isArray(filter.derivedNodeIds)
-      ? filter.derivedNodeIds.filter((id): id is string => typeof id === "string")
-      : [])
+    derivedIds: new Set(derivedIds),
+    sourceNodeIds: new Set(derivedIds.map(sourceNodeIdFromGeneratedId).filter((id): id is string => Boolean(id)))
   };
 }
 
 function filterGeneratedByGroup(
   generated: GeneratedNode[],
-  groupFilter: { exists: boolean; derivedIds: Set<string> } | null
+  groupFilter: GroupFilter | null
 ): GeneratedNode[] {
   if (!groupFilter) return generated;
   if (groupFilter.exists === false) return [];
-  return generated.filter((item) => groupFilter.derivedIds.has(item.id));
+  const exact = generated.filter((item) => groupFilter.derivedIds.has(item.id));
+  if (exact.length > 0 || groupFilter.sourceNodeIds.size === 0) return exact;
+  return generated.filter((item) => groupFilter.sourceNodeIds.has(item.sourceNodeId));
+}
+
+function sourceNodeIdFromGeneratedId(id: string): string | null {
+  const match = /^(node_[^:]+):/.exec(id);
+  return match ? match[1] : null;
 }
 
 function selectEndpoints(
