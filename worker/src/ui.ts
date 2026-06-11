@@ -932,16 +932,37 @@ export function renderAdminUi(env: Env): string {
       if (Array.isArray(item.parentIds)) return item.parentIds.filter(Boolean);
       return [];
     }
-    function importRulesFromReview() {
+    function activeImportSource() {
+      return activeImportSourceId ? state.importSources.find((source) => source.id === activeImportSourceId) : null;
+    }
+    function importRulesFromReview(baseRules) {
       const candidateById = new Map(state.importCandidates.map((item) => [item.id, item]));
+      const candidateKeys = new Set(state.importCandidates.map((item) => item.importKey).filter(Boolean));
+      const currentRules = baseRules || {};
       const parentKeysByKey = {};
       const carrierKeys = [];
       const displayNamesByKey = {};
+      const removedKeys = [];
+
+      (currentRules.removedKeys || []).forEach((key) => {
+        if (!candidateKeys.has(key)) removedKeys.push(key);
+      });
+      (currentRules.carrierKeys || []).forEach((key) => {
+        if (!candidateKeys.has(key)) carrierKeys.push(key);
+      });
+      Object.keys(currentRules.parentKeysByKey || {}).forEach((key) => {
+        if (!candidateKeys.has(key)) parentKeysByKey[key] = currentRules.parentKeysByKey[key];
+      });
+      Object.keys(currentRules.displayNamesByKey || {}).forEach((key) => {
+        if (!candidateKeys.has(key)) displayNamesByKey[key] = currentRules.displayNamesByKey[key];
+      });
+
       state.importCandidates.forEach((item) => {
         if (!item.importKey) return;
         if ((item.name || '').trim() && (item.name || '').trim() !== (item.originalName || '').trim()) {
           displayNamesByKey[item.importKey] = item.name.trim();
         }
+        if (item.removed) removedKeys.push(item.importKey);
         if (!item.removed && item.asTlsCarrier) carrierKeys.push(item.importKey);
         const parentKeys = parentIdsForItem(item)
           .map((id) => candidateById.get(id))
@@ -955,8 +976,8 @@ export function renderAdminUi(env: Env): string {
       return {
         excludeKeywords: byId('importExcludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
         includeKeywords: byId('importIncludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
-        removedKeys: state.importCandidates.filter((item) => item.removed && item.importKey).map((item) => item.importKey),
-        carrierKeys,
+        removedKeys: unique(removedKeys),
+        carrierKeys: unique(carrierKeys),
         parentKeysByKey,
         displayNamesByKey
       };
@@ -1411,7 +1432,7 @@ export function renderAdminUi(env: Env): string {
       try {
         const path = editingImportSourceId ? '/api/admin/import-sources/' + editingImportSourceId : '/api/admin/import-sources';
         const method = editingImportSourceId ? 'PATCH' : 'POST';
-        const rules = importRulesFromReview();
+        const rules = importRulesFromReview((activeImportSource() || {}).rules || {});
         const sourceKind = byId('importSourceKind').value;
         const data = await api(path, { method, body: JSON.stringify({
           name: byId('importSourceName').value,
@@ -1507,7 +1528,7 @@ export function renderAdminUi(env: Env): string {
         if (!activeImportSourceId) throw new Error('Save or select an import source before saving rules.');
         await api('/api/admin/import-sources/' + activeImportSourceId, {
           method: 'PATCH',
-          body: JSON.stringify({ rules: importRulesFromReview() })
+          body: JSON.stringify({ rules: importRulesFromReview((activeImportSource() || {}).rules || {}) })
         });
         setNotice('Import rules saved.', 'ok');
         await refreshImportSources();
@@ -1519,9 +1540,26 @@ export function renderAdminUi(env: Env): string {
       try {
         const candidates = activeImportCandidatesForCommit();
         if (candidates.length === 0) throw new Error('No selected import candidates.');
+        const source = activeImportSource();
+        const rules = importRulesFromReview((source || {}).rules || {});
+        if (activeImportSourceId) {
+          await api('/api/admin/import-sources/' + activeImportSourceId, {
+            method: 'PATCH',
+            body: JSON.stringify({ rules })
+          });
+          await refreshImportSources();
+        }
         const data = await api('/api/admin/proxy-nodes/import-subscription', {
           method: 'POST',
-          body: JSON.stringify({ candidates, enabled: true })
+          body: JSON.stringify({
+            candidates,
+            enabled: true,
+            ...(source ? {
+              remark: source.name,
+              replaceExistingForRemark: true,
+              replaceExistingRemarks: source.source_kind === 'url' ? source.url || '' : ''
+            } : {})
+          })
         });
         state.importCandidates = [];
         renderImportReview();
