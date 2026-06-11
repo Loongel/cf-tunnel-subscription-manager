@@ -218,6 +218,8 @@ export function renderAdminUi(env: Env): string {
     .import-node strong { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
     .import-node .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .import-node .dup { color: var(--warn); font-size: 12px; white-space: nowrap; }
+    .import-name-input { flex: 1 1 100%; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; outline: none; overflow-wrap: anywhere; }
+    .import-name-input:focus { color: var(--selected); }
     .tls-controls { display: grid; gap: 6px; }
     @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
@@ -663,8 +665,8 @@ export function renderAdminUi(env: Env): string {
         const rules = row.rules || {};
         const exclude = (rules.excludeKeywords || []).join(', ');
         const include = (rules.includeKeywords || []).join(', ');
-        const removed = (rules.removedNames || []).length || 0;
-        const parentCount = Object.keys(rules.parentNamesByName || {}).length;
+        const removed = (rules.removedKeys || []).length || 0;
+        const parentCount = Object.keys(rules.parentKeysByKey || {}).length;
         const source = row.source_kind === 'url' ? row.url : 'pasted content';
         const ruleText = [include ? 'include: ' + include : '', exclude ? 'exclude: ' + exclude : '', removed ? removed + ' unused' : '', parentCount ? parentCount + ' fallback links' : ''].filter(Boolean).join(' / ') || '-';
         return '<tr><td>' + esc(row.name) + '<br>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="mono">' + esc(source || '') + '</td><td>' + esc(ruleText) + '</td><td>' + esc(row.last_imported_at || row.last_error || '-') + '</td><td class="row-actions"><button data-edit-import-source="' + esc(row.id) + '">Edit</button><button data-preview-import-source="' + esc(row.id) + '">Preview</button><button data-refresh-import-source="' + esc(row.id) + '">Refresh</button><button data-delete-import-source="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
@@ -889,7 +891,8 @@ export function renderAdminUi(env: Env): string {
       const meta = [item.protocol, item.transport, item.server ? item.server + (item.port ? ':' + item.port : '') : null, tlsMeta].filter(Boolean).join(' / ');
       return '<div class="import-row' + (hasParent ? ' child' : '') + '">' +
         '<div class="import-node' + (item.asTlsCarrier ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
-          '<strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span>' +
+          '<input class="import-name-input" data-import-display-name="' + esc(item.id) + '" value="' + esc(item.name) + '" aria-label="Display name">' +
+          '<span class="meta">' + esc(meta || item.sourceName) + '</span>' +
           (item.asTlsCarrier ? '<span class="dup">TLS carrier</span>' : '') +
           (item.duplicate ? '<span class="dup">will update existing</span>' : '') +
         '</div>' +
@@ -931,24 +934,29 @@ export function renderAdminUi(env: Env): string {
     }
     function importRulesFromReview() {
       const candidateById = new Map(state.importCandidates.map((item) => [item.id, item]));
-      const parentNamesByName = {};
-      const carrierNames = [];
+      const parentKeysByKey = {};
+      const carrierKeys = [];
+      const displayNamesByKey = {};
       state.importCandidates.forEach((item) => {
-        if (!item.removed && item.asTlsCarrier) carrierNames.push(item.name);
-        const names = parentIdsForItem(item)
+        if (!item.importKey) return;
+        displayNamesByKey[item.importKey] = item.name;
+        if (!item.removed && item.asTlsCarrier) carrierKeys.push(item.importKey);
+        const parentKeys = parentIdsForItem(item)
           .map((id) => candidateById.get(id))
           .filter((parent) => parent && parent.asTlsCarrier && !item.removed && !parent.removed)
-          .map((parent) => parent.name);
-        if (names.length > 0) {
-          parentNamesByName[item.name] = Array.from(new Set(names));
+          .map((parent) => parent.importKey)
+          .filter(Boolean);
+        if (parentKeys.length > 0) {
+          parentKeysByKey[item.importKey] = Array.from(new Set(parentKeys));
         }
       });
       return {
         excludeKeywords: byId('importExcludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
         includeKeywords: byId('importIncludeKeywords').value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean),
-        removedNames: state.importCandidates.filter((item) => item.removed).map((item) => item.name),
-        carrierNames,
-        parentNamesByName
+        removedKeys: state.importCandidates.filter((item) => item.removed && item.importKey).map((item) => item.importKey),
+        carrierKeys,
+        parentKeysByKey,
+        displayNamesByKey
       };
     }
 
@@ -1139,6 +1147,14 @@ export function renderAdminUi(env: Env): string {
           item.parentIds = Array.from(new Set(parentIds.filter(Boolean)));
           renderImportReview();
         }
+      }
+    });
+
+    document.body.addEventListener('input', (e) => {
+      const t = e.target;
+      if (t && t.dataset && t.dataset.importDisplayName) {
+        const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.importDisplayName);
+        if (item) item.name = t.value.trim() || item.originalName || item.name;
       }
     });
 

@@ -30,13 +30,31 @@ class MockStatement {
 
   async run(): Promise<void> {
     if (this.query.startsWith("INSERT INTO proxy_nodes")) {
-      const [id, name, remark, sourceType, rawConfig, protocol, enabled, useTunnel, selectedTunnelId, createdAt, updatedAt] = this.params;
+      const [
+        id,
+        name,
+        remark,
+        sourceType,
+        rawConfig,
+        importKey,
+        importSourceName,
+        rawConfigHash,
+        protocol,
+        enabled,
+        useTunnel,
+        selectedTunnelId,
+        createdAt,
+        updatedAt
+      ] = this.params;
       this.tables.nodes.push({
         id: String(id),
         name: String(name),
         remark: typeof remark === "string" ? remark : null,
         source_type: String(sourceType),
         raw_config: String(rawConfig),
+        import_key: typeof importKey === "string" ? importKey : null,
+        import_source_name: typeof importSourceName === "string" ? importSourceName : null,
+        raw_config_hash: typeof rawConfigHash === "string" ? rawConfigHash : null,
         protocol: String(protocol),
         enabled: Number(enabled),
         use_tunnel: Number(useTunnel),
@@ -71,9 +89,9 @@ class MockStatement {
   }
 
   private rows(): unknown[] {
-    if (this.query.includes("SELECT id, name FROM proxy_nodes WHERE remark IN")) {
+    if (this.query.includes("SELECT id, name, import_key FROM proxy_nodes WHERE remark IN")) {
       const remarks = new Set(this.params.map(String));
-      return this.tables.nodes.filter((row) => row.remark && remarks.has(row.remark)).map(({ id, name }) => ({ id, name }));
+      return this.tables.nodes.filter((row) => row.remark && remarks.has(row.remark)).map(({ id, name, import_key }) => ({ id, name, import_key }));
     }
     if (this.query.includes("FROM proxy_node_endpoint_selections s")) {
       const nodeIds = new Set(this.params.map(String));
@@ -87,6 +105,12 @@ class MockStatement {
     }
     if (this.query.includes("SELECT * FROM proxy_nodes WHERE name = ?")) {
       return this.tables.nodes.filter((row) => row.name === this.params[0]);
+    }
+    if (this.query.includes("SELECT * FROM proxy_nodes WHERE import_key = ?")) {
+      return this.tables.nodes.filter((row) => row.import_key === this.params[0]);
+    }
+    if (this.query.includes("SELECT import_key FROM proxy_nodes")) {
+      return this.tables.nodes.map((row) => ({ import_key: row.import_key || null }));
     }
     return [];
   }
@@ -105,13 +129,16 @@ function env(tables: TableMap): Env {
   };
 }
 
-function node(id: string, name: string, remark: string): ProxyNodeRow {
+function node(id: string, name: string, remark: string, rawConfig: string, rawHash: string): ProxyNodeRow {
   return {
     id,
     name,
     remark,
     source_type: "v2ray_uri",
-    raw_config: "vless://00000000-0000-4000-8000-000000000000@old.example:80?type=ws#content",
+    raw_config: rawConfig,
+    import_key: `import:v1:${remark}:${rawHash}`,
+    import_source_name: remark,
+    raw_config_hash: rawHash,
     protocol: "vless",
     enabled: 1,
     use_tunnel: 0,
@@ -123,8 +150,9 @@ function node(id: string, name: string, remark: string): ProxyNodeRow {
 
 describe("admin import refresh", () => {
   it("preserves node-scoped endpoint selections when imported nodes are replaced", async () => {
+    const rawConfig = "vless://00000000-0000-4000-8000-000000000000@new.example:443?security=tls&type=ws#content";
     const tables: TableMap = {
-      nodes: [node("old_node", "content", "managed-sub")],
+      nodes: [node("old_node", "content", "managed-sub", rawConfig, "0eeaed8594ef0d34470debacf478e7c3f72f4140")],
       endpoints: [
         {
           id: "endpoint_private",
@@ -167,7 +195,7 @@ describe("admin import refresh", () => {
         sourceName: "managed-sub",
         sourceType: "v2ray_uri",
         name: "content",
-        rawConfig: "vless://00000000-0000-4000-8000-000000000000@new.example:443?security=tls&type=ws#content",
+        rawConfig,
         protocol: "vless"
       }]
     });
@@ -178,5 +206,38 @@ describe("admin import refresh", () => {
     expect(tables.endpointSelections).toEqual([
       { proxy_node_id: tables.nodes[0].id, endpoint_id: "endpoint_private", enabled: 1 }
     ]);
+  });
+
+  it("imports same-name nodes when their raw configs differ", async () => {
+    const tables: TableMap = { nodes: [], endpoints: [], endpointSelections: [] };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "sui.hk",
+      candidates: [
+        {
+          id: "candidate_1",
+          sourceName: "sui.hk",
+          sourceGroup: "sui.hk",
+          sourceType: "v2ray_uri",
+          name: "direct-out@usr",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000001@one.example:443?security=tls&type=ws#direct-out%40usr",
+          protocol: "vless"
+        },
+        {
+          id: "candidate_2",
+          sourceName: "sui.hk",
+          sourceGroup: "sui.hk",
+          sourceType: "v2ray_uri",
+          name: "direct-out@usr",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000002@two.example:443?security=tls&type=ws#direct-out%40usr",
+          protocol: "vless"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({ imported: 2, updated: 0, skipped: 0 });
+    expect(tables.nodes).toHaveLength(2);
+    expect(new Set(tables.nodes.map((row) => row.import_key)).size).toBe(2);
+    expect(tables.nodes.map((row) => row.name)).toEqual(["direct-out@usr", "direct-out@usr"]);
   });
 });

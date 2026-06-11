@@ -75,6 +75,9 @@ export interface ProxyNodeRow {
   remark: string | null;
   source_type: string;
   raw_config: string;
+  import_key?: string | null;
+  import_source_name?: string | null;
+  raw_config_hash?: string | null;
   protocol: string;
   enabled: number;
   use_tunnel: number;

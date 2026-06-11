@@ -38,7 +38,14 @@ interface CountRow {
 interface DeletedImportedNodeRow {
   id: string;
   name: string;
+  import_key: string | null;
   selectedEndpointIds: string[];
+}
+
+interface ImportSourceContent {
+  name: string;
+  groupName: string;
+  content: string;
 }
 
 export async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -353,13 +360,17 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
   await run(
     env.DB,
     `INSERT INTO proxy_nodes
-      (id, name, remark, source_type, raw_config, protocol, enabled, use_tunnel, selected_tunnel_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, remark, source_type, raw_config, import_key, import_source_name, raw_config_hash,
+       protocol, enabled, use_tunnel, selected_tunnel_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     name,
     optionalString(body.remark),
     sourceType,
     rawConfig,
+    optionalString(body.importKey),
+    optionalString(body.importSourceName),
+    optionalString(body.rawConfigHash),
     protocol,
     boolToInt(body.enabled, true),
     body.useTunnel === undefined
@@ -391,8 +402,8 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   const imported: Array<ProxyNodeRow | null> = [];
   const errors: string[] = [];
   const byId = new Map(activeCandidates.map((item) => [item.id, item]));
-  const seenNames = new Set<string>();
-  const newIdsByName = new Map<string, string>();
+  const seenImportKeys = new Set<string>();
+  const newIdsByImportKey = new Map<string, string>();
   let skipped = 0;
   let created = 0;
   let updated = 0;
@@ -404,11 +415,11 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     deletedOld = deletedRows.length;
   }
 
-  const deletedEndpointIdsByName = endpointSelectionsByDeletedName(deletedRows);
+  const deletedEndpointIdsByImportKey = endpointSelectionsByDeletedImportKey(deletedRows);
 
   for (const item of activeCandidates) {
     const name = item.name.trim();
-    if (!name || seenNames.has(name)) {
+    if (!name) {
       skipped += 1;
       continue;
     }
@@ -431,20 +442,24 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       : [{ name, rawConfig: item.rawConfig }];
 
     for (const variant of variants) {
-      if (seenNames.has(variant.name)) {
-        skipped += 1;
-        continue;
-      }
-      seenNames.add(variant.name);
       try {
-        const stableId = await stableImportedNodeId(remark || item.sourceName, variant.name);
-        const restoredEndpointIds = deletedEndpointIdsByName.get(variant.name) || [];
-        newIdsByName.set(variant.name, stableId);
+        const identity = await importIdentity(remark || item.sourceGroup || item.sourceName, variant.rawConfig, item.sourceType);
+        if (seenImportKeys.has(identity.importKey)) {
+          skipped += 1;
+          continue;
+        }
+        seenImportKeys.add(identity.importKey);
+        const stableId = await stableImportedNodeId(identity.importKey);
+        const restoredEndpointIds = deletedEndpointIdsByImportKey.get(identity.importKey) || [];
+        newIdsByImportKey.set(identity.importKey, stableId);
         const payload = {
           name: variant.name,
           remark: remark || item.sourceName,
           rawConfig: variant.rawConfig,
           sourceType: item.sourceType,
+          importKey: identity.importKey,
+          importSourceName: remark || item.sourceGroup || item.sourceName,
+          rawConfigHash: identity.contentHash,
           protocol: item.protocol,
           enabled: body.enabled === undefined ? true : body.enabled,
           useTunnel: false,
@@ -453,7 +468,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
         };
         const result = body.replaceExistingForRemark === true && remark
           ? { row: await createProxyNode(env, payload), created: true }
-          : await upsertProxyNodeByName(env, payload);
+          : await upsertImportedProxyNode(env, payload);
         imported.push(result.row);
         if (result.created) created += 1;
         else updated += 1;
@@ -464,8 +479,8 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     }
   }
 
-  if (deletedRows.length > 0 && newIdsByName.size > 0) {
-    await migrateGroupDerivedNodeIds(env, deletedRows, newIdsByName);
+  if (deletedRows.length > 0 && newIdsByImportKey.size > 0) {
+    await migrateGroupDerivedNodeIds(env, deletedRows, newIdsByImportKey);
   }
 
   return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
@@ -478,9 +493,9 @@ function replacementRemarks(body: JsonRecord, remark: string): string[] {
 async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<DeletedImportedNodeRow[]> {
   if (remarks.length === 0) return [];
   const placeholders = remarks.map(() => "?").join(", ");
-  const rows = await all<{ id: string; name: string }>(
+  const rows = await all<{ id: string; name: string; import_key: string | null }>(
     env.DB,
-    `SELECT id, name FROM proxy_nodes WHERE remark IN (${placeholders})`,
+    `SELECT id, name, import_key FROM proxy_nodes WHERE remark IN (${placeholders})`,
     ...remarks
   );
   const selectedEndpointIdsByNodeId = await selectedNodeScopedEndpointIds(env, rows.map((row) => row.id));
@@ -513,34 +528,76 @@ async function selectedNodeScopedEndpointIds(env: Env, nodeIds: string[]): Promi
   return output;
 }
 
-function endpointSelectionsByDeletedName(rows: DeletedImportedNodeRow[]): Map<string, string[]> {
+function endpointSelectionsByDeletedImportKey(rows: DeletedImportedNodeRow[]): Map<string, string[]> {
   const output = new Map<string, string[]>();
   for (const row of rows) {
+    if (!row.import_key) continue;
     if (row.selectedEndpointIds.length === 0) continue;
-    const ids = output.get(row.name) || [];
+    const ids = output.get(row.import_key) || [];
     for (const endpointId of row.selectedEndpointIds) {
       if (!ids.includes(endpointId)) ids.push(endpointId);
     }
-    output.set(row.name, ids);
+    output.set(row.import_key, ids);
   }
   return output;
 }
 
-async function stableImportedNodeId(sourceName: string, nodeName: string): Promise<string> {
-  const bytes = new TextEncoder().encode(`${sourceName}\n${nodeName}`);
+async function stableImportedNodeId(importKey: string): Promise<string> {
+  const bytes = new TextEncoder().encode(importKey);
   const digest = await crypto.subtle.digest("SHA-1", bytes);
   const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `node_${hex.slice(0, 32)}`;
 }
 
+async function importIdentity(
+  sourceGroup: string,
+  rawConfig: string,
+  sourceType: string
+): Promise<{ importKey: string; contentHash: string }> {
+  const normalized = normalizeRawConfigForIdentity(rawConfig, sourceType);
+  const contentHash = await sha1Hex(normalized);
+  return {
+    importKey: `import:v1:${sourceGroup}:${contentHash}`,
+    contentHash
+  };
+}
+
+function normalizeRawConfigForIdentity(rawConfig: string, sourceType: string): string {
+  const trimmed = rawConfig.trim();
+  if (sourceType !== "sing_box_outbound") return trimmed;
+  try {
+    return stableJsonStringify(JSON.parse(trimmed));
+  } catch {
+    return trimmed;
+  }
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => {
+      const item = (value as Record<string, unknown>)[key];
+      return `${JSON.stringify(key)}:${stableJsonStringify(item)}`;
+    }).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function sha1Hex(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-1", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function migrateGroupDerivedNodeIds(
   env: Env,
-  deletedRows: Array<{ id: string; name: string }>,
-  newIdsByName: Map<string, string>
+  deletedRows: Array<{ id: string; import_key: string | null }>,
+  newIdsByImportKey: Map<string, string>
 ): Promise<void> {
   const oldToNewId = new Map<string, string>();
   for (const row of deletedRows) {
-    const newId = newIdsByName.get(row.name);
+    if (!row.import_key) continue;
+    const newId = newIdsByImportKey.get(row.import_key);
     if (newId) oldToNewId.set(row.id, newId);
   }
   if (oldToNewId.size === 0) return;
@@ -590,8 +647,12 @@ async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
 interface ImportCandidate {
   id: string;
   name: string;
+  originalName: string;
   sourceName: string;
+  sourceGroup: string;
   rawConfig: string;
+  importKey: string;
+  contentHash: string;
   sourceType: "v2ray_uri" | "sing_box_outbound";
   protocol: string;
   server?: string;
@@ -612,10 +673,11 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
   const sources = await readImportSources(body);
   if (sources.length === 0) throw new HttpError(400, "subscription URL or content is required");
   const namePrefix = optionalString(body.namePrefix);
-  const existing = await all<{ name: string }>(env.DB, "SELECT name FROM proxy_nodes");
-  const existingNames = new Set(existing.map((row) => row.name));
+  const existing = await all<{ import_key: string | null }>(env.DB, "SELECT import_key FROM proxy_nodes WHERE import_key IS NOT NULL");
+  const existingImportKeys = new Set(existing.map((row) => row.import_key).filter((key): key is string => Boolean(key)));
   const candidates: ImportCandidate[] = [];
   const errors: string[] = [];
+  const seenImportKeys = new Set<string>();
 
   for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
     const source = sources[sourceIndex];
@@ -631,13 +693,21 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
       continue;
     }
 
-    parsed.forEach((item, itemIndex) => {
+    for (let itemIndex = 0; itemIndex < parsed.length; itemIndex += 1) {
+      const item = parsed[itemIndex];
       const name = namePrefix ? `${namePrefix} ${item.name}` : item.name;
+      const identity = await importIdentity(source.groupName, item.rawConfig, item.sourceType);
+      if (seenImportKeys.has(identity.importKey)) continue;
+      seenImportKeys.add(identity.importKey);
       candidates.push({
         id: `candidate_${sourceIndex}_${itemIndex}`,
         name,
+        originalName: name,
         sourceName: source.name,
+        sourceGroup: source.groupName,
         rawConfig: item.rawConfig,
+        importKey: identity.importKey,
+        contentHash: identity.contentHash,
         sourceType: item.sourceType,
         protocol: item.protocol,
         server: item.server,
@@ -645,36 +715,84 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
         sni: item.sni,
         transport: item.transport,
         tls: item.tls,
-        duplicate: existingNames.has(name)
+        duplicate: existingImportKeys.has(identity.importKey)
       });
-    });
+    }
   }
 
+  applyDisplayNameDisambiguation(candidates, currentImportRules(isRecord(body.rules) ? body.rules as JsonRecord : {}));
   return { candidates, errors };
+}
+
+function applyDisplayNameDisambiguation(candidates: ImportCandidate[], rules: JsonRecord): void {
+  const displayNamesByKey = isRecord(rules.displayNamesByKey) ? rules.displayNamesByKey as JsonRecord : {};
+  const byOriginalName = new Map<string, ImportCandidate[]>();
+  for (const candidate of candidates) {
+    const items = byOriginalName.get(candidate.originalName) || [];
+    items.push(candidate);
+    byOriginalName.set(candidate.originalName, items);
+  }
+
+  const used = new Set<string>();
+  for (const candidate of candidates) {
+    const savedName = optionalString(displayNamesByKey[candidate.importKey]);
+    if (savedName) {
+      candidate.name = savedName;
+      used.add(savedName);
+    }
+  }
+
+  for (const group of byOriginalName.values()) {
+    for (const candidate of group) {
+      if (optionalString(displayNamesByKey[candidate.importKey])) continue;
+      let name = candidate.originalName;
+      if (group.length > 1) {
+        const sourceLabel = compactImportSourceLabel(candidate.sourceName);
+        name = sourceLabel ? `${sourceLabel} ${candidate.originalName}` : `${candidate.originalName} #${candidate.contentHash.slice(0, 6)}`;
+      }
+      if (used.has(name)) name = `${name} #${candidate.contentHash.slice(0, 6)}`;
+      candidate.name = name;
+      used.add(name);
+    }
+  }
+}
+
+function compactImportSourceLabel(sourceName: string): string {
+  try {
+    const url = new URL(sourceName);
+    const segments = url.pathname.split("/").map((item) => item.trim()).filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    return (lastSegment || url.hostname).replace(/\.(txt|list|conf|json)$/i, "").slice(0, 32);
+  } catch {
+    return sourceName.length > 32 ? sourceName.slice(0, 32) : sourceName;
+  }
 }
 
 function applyImportRules(candidates: ImportCandidate[], rules: JsonRecord): ImportCandidate[] {
   const excludeKeywords = stringArray(rules.excludeKeywords).map((item) => item.toLowerCase());
   const includeKeywords = stringArray(rules.includeKeywords).map((item) => item.toLowerCase());
-  const removedNames = new Set(stringArray(rules.removedNames));
-  const carrierNames = new Set(stringArray(rules.carrierNames));
-  const parentNamesByName = isRecord(rules.parentNamesByName)
-    ? rules.parentNamesByName as JsonRecord
+  const removedKeys = new Set(stringArray(rules.removedKeys));
+  const carrierKeys = new Set(stringArray(rules.carrierKeys));
+  const parentKeysByKey = isRecord(rules.parentKeysByKey)
+    ? rules.parentKeysByKey as JsonRecord
     : {};
-  const byName = new Map(candidates.map((item) => [item.name, item]));
+  const displayNamesByKey = isRecord(rules.displayNamesByKey) ? rules.displayNamesByKey as JsonRecord : {};
+  const byImportKey = new Map(candidates.map((item) => [item.importKey, item]));
 
   for (const item of candidates) {
+    const displayName = optionalString(displayNamesByKey[item.importKey]);
+    if (displayName) item.name = displayName;
     const haystack = [item.name, item.protocol, item.server, item.sni, item.transport, item.sourceName].filter(Boolean).join(" ").toLowerCase();
     const includeMatched = includeKeywords.length === 0 || includeKeywords.some((keyword) => haystack.includes(keyword));
     const excludeMatched = excludeKeywords.some((keyword) => haystack.includes(keyword));
-    item.removed = removedNames.has(item.name) || !includeMatched || excludeMatched;
-    item.asTlsCarrier = carrierNames.has(item.name);
+    item.removed = removedKeys.has(item.importKey) || !includeMatched || excludeMatched;
+    item.asTlsCarrier = carrierKeys.has(item.importKey);
   }
 
   for (const item of candidates) {
-    const parentNames = stringArray(parentNamesByName[item.name]);
-    const parents = Array.from(new Set(parentNames))
-      .map((name) => byName.get(name))
+    const parentKeys = stringArray(parentKeysByKey[item.importKey]);
+    const parents = Array.from(new Set(parentKeys))
+      .map((key) => byImportKey.get(key))
       .filter((parent): parent is ImportCandidate => Boolean(parent && parent.asTlsCarrier && !item.removed && !parent.removed));
     if (parents.length > 0) {
       item.parentIds = parents.map((parent) => parent.id);
@@ -690,17 +808,25 @@ function importRulesFromBody(body: JsonRecord): JsonRecord {
   const includeKeywords = parseEndpointValues(body.includeKeywords ?? inputRules.includeKeywords);
   if (excludeKeywords.length > 0) rules.excludeKeywords = excludeKeywords;
   if (includeKeywords.length > 0) rules.includeKeywords = includeKeywords;
-  const removedNames = body.removedNames ?? inputRules.removedNames;
-  if (Array.isArray(removedNames)) {
-    rules.removedNames = stringArray(removedNames);
+  const removedKeys = body.removedKeys ?? inputRules.removedKeys;
+  if (Array.isArray(removedKeys)) {
+    rules.removedKeys = stringArray(removedKeys);
   }
-  const parentNamesByName = body.parentNamesByName ?? inputRules.parentNamesByName;
-  if (isRecord(parentNamesByName)) {
-    rules.parentNamesByName = parentNamesByName;
+  const parentKeysByKey = body.parentKeysByKey ?? inputRules.parentKeysByKey;
+  if (isRecord(parentKeysByKey)) {
+    rules.parentKeysByKey = parentKeysByKey;
   }
-  const carrierNames = body.carrierNames ?? inputRules.carrierNames;
-  if (Array.isArray(carrierNames)) {
-    rules.carrierNames = stringArray(carrierNames);
+  const carrierKeys = body.carrierKeys ?? inputRules.carrierKeys;
+  if (Array.isArray(carrierKeys)) {
+    rules.carrierKeys = stringArray(carrierKeys);
+  }
+  const displayNamesByKey = body.displayNamesByKey ?? inputRules.displayNamesByKey;
+  if (isRecord(displayNamesByKey)) {
+    const output: JsonRecord = {};
+    for (const [key, value] of Object.entries(displayNamesByKey)) {
+      if (typeof value === "string" && value.trim()) output[key] = value.trim();
+    }
+    rules.displayNamesByKey = output;
   }
   return rules;
 }
@@ -724,11 +850,18 @@ function normalizeImportCandidates(value: unknown[]): ImportCandidate[] {
     .map((item, index) => {
       const sourceType = optionalString(item.sourceType) === "sing_box_outbound" ? "sing_box_outbound" : "v2ray_uri";
       const rawConfig = requiredString(item.rawConfig, "candidate.rawConfig");
+      const sourceGroup = optionalString(item.sourceGroup) || optionalString(item.importSourceName) || optionalString(item.sourceName) || "import";
+      const importKey = optionalString(item.importKey) || "";
+      const contentHash = optionalString(item.contentHash) || optionalString(item.rawConfigHash) || "";
       return {
         id: optionalString(item.id) || `candidate_${index}`,
         name: requiredString(item.name, "candidate.name"),
+        originalName: optionalString(item.originalName) || requiredString(item.name, "candidate.name"),
         sourceName: optionalString(item.sourceName) || "import",
+        sourceGroup,
         rawConfig,
+        importKey,
+        contentHash,
         sourceType,
         protocol: optionalString(item.protocol) || inferProtocol(rawConfig, sourceType),
         server: optionalString(item.server) || undefined,
@@ -835,9 +968,10 @@ async function updateImportSource(env: Env, id: string, body: JsonRecord): Promi
   const rules = body.rules === undefined
     && body.excludeKeywords === undefined
     && body.includeKeywords === undefined
-    && body.removedNames === undefined
-    && body.parentNamesByName === undefined
-    && body.carrierNames === undefined
+    && body.removedKeys === undefined
+    && body.parentKeysByKey === undefined
+    && body.carrierKeys === undefined
+    && body.displayNamesByKey === undefined
     ? parseJsonObject(current.rules_json)
     : importRulesFromBody(body);
   await run(
@@ -950,20 +1084,21 @@ function importSourceBody(source: ImportSourceRow): JsonRecord {
   };
 }
 
-async function upsertProxyNodeByName(env: Env, body: JsonRecord): Promise<{ row: ProxyNodeRow | null; created: boolean }> {
-  const name = requiredString(body.name, "name");
-  const existing = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE name = ? ORDER BY updated_at DESC LIMIT 1", name);
+async function upsertImportedProxyNode(env: Env, body: JsonRecord): Promise<{ row: ProxyNodeRow | null; created: boolean }> {
+  const importKey = requiredString(body.importKey, "importKey");
+  const existing = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE import_key = ? ORDER BY updated_at DESC LIMIT 1", importKey);
   if (existing) {
     return { row: await updateProxyNode(env, existing.id, body), created: false };
   }
   return { row: await createProxyNode(env, body), created: true };
 }
 
-async function readImportSources(body: JsonRecord): Promise<Array<{ name: string; content: string }>> {
-  const sources: Array<{ name: string; content: string }> = [];
+async function readImportSources(body: JsonRecord): Promise<ImportSourceContent[]> {
+  const sources: ImportSourceContent[] = [];
+  const groupName = optionalString(body.sourceName) || optionalString(body.remark) || "import";
   const content = optionalString(body.content);
   if (content) {
-    sources.push({ name: optionalString(body.sourceName) || "pasted-subscription", content });
+    sources.push({ name: optionalString(body.sourceName) || "pasted-subscription", groupName, content });
   }
 
   const urls = parseEndpointValues(body.url ?? body.urls);
@@ -976,7 +1111,7 @@ async function readImportSources(body: JsonRecord): Promise<Array<{ name: string
       }
     });
     if (!res.ok) throw new HttpError(400, `failed to fetch ${sourceUrl}: HTTP ${res.status}`);
-    sources.push({ name: sourceUrl, content: await res.text() });
+    sources.push({ name: sourceUrl, groupName, content: await res.text() });
   }
   return sources;
 }
@@ -999,13 +1134,17 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
   await run(
     env.DB,
     `UPDATE proxy_nodes SET
-      name = ?, remark = ?, source_type = ?, raw_config = ?, protocol = ?,
+      name = ?, remark = ?, source_type = ?, raw_config = ?,
+      import_key = ?, import_source_name = ?, raw_config_hash = ?, protocol = ?,
       enabled = ?, use_tunnel = ?, selected_tunnel_id = ?, updated_at = ?
      WHERE id = ?`,
     optionalString(body.name) || current.name,
     body.remark === null ? null : optionalString(body.remark) || current.remark,
     sourceType,
     rawConfig,
+    body.importKey === undefined ? current.import_key || null : optionalString(body.importKey),
+    body.importSourceName === undefined ? current.import_source_name || null : optionalString(body.importSourceName),
+    body.rawConfigHash === undefined ? current.raw_config_hash || null : optionalString(body.rawConfigHash),
     optionalString(body.protocol) || inferProtocol(rawConfig, sourceType),
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     body.useTunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel),
