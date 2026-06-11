@@ -1049,14 +1049,28 @@ export function renderAdminUi(env: Env): string {
     }
     function groupChipsHtml(ids) {
       if (!ids || ids.length === 0) return '<span class="muted small">-</span>';
-      return '<div class="group-chip-row">' + ids.map((id) => {
+      const grouped = [];
+      for (const id of ids) {
         const item = state.generatedNodes.find((node) => node.id === id);
-        if (!item) return '<span class="group-chip" title="' + esc(id) + '"><span>' + esc(id) + '</span></span>';
+        if (!item) {
+          grouped.push({ id, name: id, title: id, tags: [{ label: id, value: id }] });
+          continue;
+        }
+        let group = grouped.find((row) => row.name === item.sourceName);
+        if (!group) {
+          group = { id: item.sourceNodeId || item.sourceName, name: item.sourceName, title: item.sourceName, tags: [] };
+          grouped.push(group);
+        }
         const tags = derivedParts(item);
-        const tagHtml = (tags.length > 0 ? tags : [{ label: 'Direct', value: 'Direct' }]).map((part) =>
+        for (const tag of (tags.length > 0 ? tags : [{ label: 'Direct', value: 'Direct' }])) {
+          if (!group.tags.some((existing) => existing.label === tag.label && existing.value === tag.value)) group.tags.push(tag);
+        }
+      }
+      return '<div class="group-chip-row">' + grouped.map((group) => {
+        const tagHtml = group.tags.map((part) =>
           '<span class="group-chip" title="' + esc(part.value || part.label) + '"><span>' + esc(part.label) + '</span></span>'
         ).join('');
-        return '<span class="group-member" title="' + esc(generatedLabel(id)) + '"><span class="group-member-name">' + esc(item.sourceName) + '</span><span class="group-member-tags">' + tagHtml + '</span></span>';
+        return '<span class="group-member" title="' + esc(group.title) + '"><span class="group-member-name">' + esc(group.name) + '</span><span class="group-member-tags">' + tagHtml + '</span></span>';
       }).join('') + '</div>';
     }
 
@@ -1566,9 +1580,9 @@ export function renderAdminUi(env: Env): string {
       try {
         await refreshDashboard();
         await refreshTunnels();
+        await refreshEndpoints();
         await refreshSnis();
         await refreshNodes();
-        await refreshEndpoints();
         await refreshImportSources();
         await refreshGeneratedNodes();
         await refreshGroups();
