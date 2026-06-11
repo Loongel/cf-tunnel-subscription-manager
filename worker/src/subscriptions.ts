@@ -133,7 +133,7 @@ export async function listGeneratedNodes(env: Env, options: SubscriptionOptions)
 
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, endpoints, selections, trafficBindings, healthyTunnels, sniSelections, groupFilter] = await Promise.all([
+  const [nodes, rawEndpoints, selections, trafficBindings, healthyTunnels, sniSelections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
@@ -165,6 +165,7 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
   ]);
 
   if (groupFilter?.exists === false) return [];
+  const endpoints = await resolveEndpointValues(rawEndpoints);
 
   const selectedByNode = new Map<string, Set<string>>();
   for (const selection of selections) {
@@ -328,6 +329,38 @@ function selectEndpoints(
   const global = available.filter((endpoint) => endpoint.scope === "global");
   if (!selected || selected.size === 0) return global;
   return available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id));
+}
+
+async function resolveEndpointValues(endpoints: PreferredEndpointRow[]): Promise<PreferredEndpointRow[]> {
+  const cache = new Map<string, Promise<string | null>>();
+  return await Promise.all(endpoints.map(async (endpoint) => {
+    if (endpoint.type !== "domain" || endpoint.resolve_mode === "none") return endpoint;
+    const key = `${endpoint.resolve_mode}:${endpoint.value.toLowerCase()}`;
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = resolveDomain(endpoint.value, endpoint.resolve_mode);
+      cache.set(key, pending);
+    }
+    const resolved = await pending;
+    return resolved ? { ...endpoint, value: resolved } : endpoint;
+  }));
+}
+
+async function resolveDomain(name: string, mode: "ipv4" | "ipv6"): Promise<string | null> {
+  const type = mode === "ipv4" ? "A" : "AAAA";
+  try {
+    const url = new URL("https://cloudflare-dns.com/dns-query");
+    url.searchParams.set("name", name);
+    url.searchParams.set("type", type);
+    const response = await fetch(url.toString(), { headers: { accept: "application/dns-json" } });
+    if (!response.ok) return null;
+    const body = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
+    const expectedType = mode === "ipv4" ? 1 : 28;
+    const answer = (body.Answer || []).find((item) => item.type === expectedType && typeof item.data === "string");
+    return answer?.data || null;
+  } catch {
+    return null;
+  }
 }
 
 function generateOne(

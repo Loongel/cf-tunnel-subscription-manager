@@ -90,6 +90,7 @@ export interface PreferredEndpointRow {
   type: "ip" | "domain";
   value: string;
   label: string | null;
+  resolve_mode: "none" | "ipv4" | "ipv6";
   enabled: number;
   scope: "global" | "node";
   default_selected: number;

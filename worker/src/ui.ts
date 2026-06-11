@@ -184,7 +184,7 @@ export function renderAdminUi(env: Env): string {
     .check-row input { width: 16px; min-height: 16px; margin-top: 2px; }
     .row-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
     .row-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .derived-grid { display: grid; gap: 9px; max-height: 430px; overflow: auto; padding-right: 2px; }
+    .derived-grid { display: grid; gap: 9px; max-height: clamp(560px, 62vh, 820px); overflow: auto; padding-right: 2px; }
     .chip-row { display: grid; gap: 9px; align-items: start; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 9px; }
     .chip-row-title { min-width: 0; }
     .chip-row-title strong { display: block; color: var(--accent-2); font-size: 12px; letter-spacing: 0; overflow-wrap: anywhere; line-height: 1.25; }
@@ -197,6 +197,8 @@ export function renderAdminUi(env: Env): string {
     .select-chip .chip-sub { margin-left: 6px; color: rgba(231, 237, 243, 0.72); overflow-wrap: anywhere; }
     .select-chip span { pointer-events: none; }
     .group-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .saved-groups-scroll { max-height: clamp(420px, 54vh, 760px); overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+    .saved-groups-scroll table th { top: 0; }
     .group-member { display: inline-grid; grid-template-columns: minmax(160px, 260px) minmax(0, 1fr); gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 6px; max-width: 100%; }
     .group-member-name { color: var(--text); font-size: 12px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
     .group-member-tags { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
@@ -406,6 +408,7 @@ export function renderAdminUi(env: Env): string {
         <div class="formgrid">
           <label>Type<select id="endpointType"><option value="ip">IP</option><option value="domain">Domain</option></select></label>
           <label>Role<select id="endpointRole"><option value="global">Global Always On</option><option value="node">Binding Option</option></select></label>
+          <label>Domain Resolve<select id="endpointResolveMode"><option value="none">Do Not Resolve</option><option value="ipv4">Resolve IPv4</option><option value="ipv6">Resolve IPv6</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
           <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com"></textarea></label>
@@ -414,7 +417,7 @@ export function renderAdminUi(env: Env): string {
         </div>
       </div>
       <div class="section">
-        <table><thead><tr><th>Type</th><th>Value</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
+        <table><thead><tr><th>Type</th><th>Value</th><th>Resolve</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
       </div>
     </section>
 
@@ -462,7 +465,7 @@ export function renderAdminUi(env: Env): string {
               <input id="savedGroupFilter" placeholder="Search groups or members">
               <select id="savedGroupMode"><option value="all">All groups</option><option value="nonempty">With members</option></select>
             </div>
-            <table><thead><tr><th>Name</th><th>Members</th><th>Sample</th><th>Actions</th></tr></thead><tbody id="groupsBody"></tbody></table>
+            <div class="saved-groups-scroll"><table><thead><tr><th>Name</th><th>Members</th><th>Sample</th><th>Actions</th></tr></thead><tbody id="groupsBody"></tbody></table></div>
           </div>
         </div>
       </div>
@@ -555,7 +558,7 @@ export function renderAdminUi(env: Env): string {
       agentsBody.innerHTML = lockedRow(6);
       tunnelsBody.innerHTML = lockedRow(6);
       nodesBody.innerHTML = lockedRow(6);
-      endpointsBody.innerHTML = lockedRow(5);
+      endpointsBody.innerHTML = lockedRow(6);
       groupsBody.innerHTML = lockedRow(4);
       subscriptionLinks.innerHTML = '<div class="muted small">Login required.</div>';
       previewOutput.textContent = '';
@@ -638,8 +641,8 @@ export function renderAdminUi(env: Env): string {
       state.endpoints = data.preferredEndpoints || [];
       renderEndpointOptions();
       endpointsBody.innerHTML = state.endpoints.map((row) =>
-        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(row.scope === 'global' ? 'Global Always On' : 'Binding Option') + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
-      ).join('') || '<tr><td colspan="5" class="muted">No preferred endpoints.</td></tr>';
+        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(row.scope === 'global' ? 'Global Always On' : 'Binding Option') + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+      ).join('') || '<tr><td colspan="6" class="muted">No preferred endpoints.</td></tr>';
     }
     async function refreshGeneratedNodes() {
       const data = await api('/api/admin/subscriptions/generated-nodes?format=v2ray&endpointMode=selected');
@@ -757,6 +760,17 @@ export function renderAdminUi(env: Env): string {
       }).join('');
       byId('bindingEndpoints').innerHTML = globals + options;
       markSelected(byId('bindingEndpoints'), Array.from(selected));
+    }
+    function endpointResolveLabel(row) {
+      if (row.type !== 'domain') return '-';
+      if (row.resolve_mode === 'ipv4') return 'Resolve IPv4';
+      if (row.resolve_mode === 'ipv6') return 'Resolve IPv6';
+      return 'Do Not Resolve';
+    }
+    function syncEndpointResolveModeControl() {
+      const isDomain = byId('endpointType').value === 'domain';
+      byId('endpointResolveMode').disabled = !isDomain;
+      if (!isDomain) byId('endpointResolveMode').value = 'none';
     }
     function filterText(id) {
       const el = byId(id);
@@ -951,10 +965,12 @@ export function renderAdminUi(env: Env): string {
       byId('createEndpoint').textContent = 'Add Endpoints';
       byId('endpointType').value = 'ip';
       byId('endpointRole').value = 'global';
+      byId('endpointResolveMode').value = 'none';
       byId('endpointEnabled').value = 'true';
       byId('endpointValues').value = '';
       byId('endpointLabel').value = '';
       byId('endpointSort').value = '0';
+      syncEndpointResolveModeControl();
     }
     function resetSniForm() {
       editingSniId = null;
@@ -1288,10 +1304,12 @@ export function renderAdminUi(env: Env): string {
             byId('createEndpoint').textContent = 'Save Endpoint';
             byId('endpointType').value = row.type || 'ip';
             byId('endpointRole').value = row.scope || 'global';
+            byId('endpointResolveMode').value = row.resolve_mode || 'none';
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
             byId('endpointValues').value = row.value || '';
             byId('endpointLabel').value = row.label || '';
             byId('endpointSort').value = String(row.sort_order || 0);
+            syncEndpointResolveModeControl();
           }
         }
         if (t.dataset.deleteEndpoint) {
@@ -1342,6 +1360,7 @@ export function renderAdminUi(env: Env): string {
     byId('bindingNodeStatus').onchange = renderBindingNodeList;
     byId('bindingTrafficFilter').oninput = renderTunnelOptions;
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
+    byId('endpointType').onchange = syncEndpointResolveModeControl;
     byId('selectAllDerived').onclick = () => markDerivedCandidates(unique([...selectedDerivedIds(), ...filteredGeneratedNodes().map((node) => node.id)]));
     byId('clearDerived').onclick = () => markDerivedCandidates([]);
     byId('groupCandidateFilter').oninput = renderGeneratedNodeOptions;
@@ -1549,6 +1568,7 @@ export function renderAdminUi(env: Env): string {
         const role = byId('endpointRole').value;
         const body = {
           type: byId('endpointType').value,
+          resolveMode: byId('endpointResolveMode').value,
           label: byId('endpointLabel').value,
           scope: role,
           defaultSelected: role === 'global',
@@ -1649,6 +1669,7 @@ export function renderAdminUi(env: Env): string {
       }
     }
 
+    syncEndpointResolveModeControl();
     refreshAll(false);
   </script>
 </body>

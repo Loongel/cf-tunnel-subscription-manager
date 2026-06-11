@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { listGeneratedNodes } from "../src/subscriptions";
 import type { Env, PreferredEndpointRow, ProxyNodeRow, TunnelRow } from "../src/types";
 
@@ -89,6 +89,7 @@ const endpoint: PreferredEndpointRow = {
   type: "ip",
   value: "104.16.0.1",
   label: "cf-ip",
+  resolve_mode: "none",
   enabled: 1,
   scope: "global",
   default_selected: 1,
@@ -98,6 +99,10 @@ const endpoint: PreferredEndpointRow = {
 };
 
 describe("subscription generation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("applies custom SNI traffic even when the source node is not a cloudflared tunnel node", async () => {
     const generated = await listGeneratedNodes(env({
       nodes: [node("node_1", "content")],
@@ -201,6 +206,79 @@ describe("subscription generation", () => {
     expect(parsed.searchParams.get("sni")).toBe("fresh.trycloudflare.com");
     expect(parsed.searchParams.get("host")).toBe("fresh.trycloudflare.com");
     expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | cf-ip | hd01 -> http://s1:80");
+  });
+
+  it("resolves domain endpoints at subscription generation time when configured", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      Answer: [{ type: 1, data: "198.51.100.10" }]
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_domain",
+        type: "domain",
+        value: "edge.example.com",
+        label: "edge-domain",
+        resolve_mode: "ipv4"
+      }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(generated[0]).toMatchObject({
+      endpointId: "endpoint_domain",
+      endpointValue: "198.51.100.10",
+      endpointLabel: "edge-domain"
+    });
+    const parsed = new URL(generated[0].uri || "");
+    expect(parsed.hostname).toBe("198.51.100.10");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | edge-domain");
+  });
+
+  it("reuses DNS lookups for repeated domain endpoints with the same resolve mode", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      Answer: [{ type: 1, data: "198.51.100.10" }]
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [
+        {
+          ...endpoint,
+          id: "endpoint_global_domain",
+          type: "domain",
+          value: "EDGE.EXAMPLE.COM",
+          label: "global-edge",
+          scope: "global",
+          resolve_mode: "ipv4"
+        },
+        {
+          ...endpoint,
+          id: "endpoint_node_domain",
+          type: "domain",
+          value: "edge.example.com",
+          label: "node-edge",
+          scope: "node",
+          default_selected: 0,
+          resolve_mode: "ipv4"
+        }
+      ],
+      endpointSelections: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_node_domain", enabled: 1 }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(generated.map((item) => item.endpointValue)).toEqual(["198.51.100.10", "198.51.100.10"]);
   });
 });
 
