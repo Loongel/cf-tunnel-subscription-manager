@@ -63,6 +63,8 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Admin UI Chromium smoke passed on 2026-06-11 after layout cleanup: authenticated page no longer shows stale public-status notice, Proxy Nodes endpoint counts reflect loaded global endpoints, and Saved Groups chips render compactly.
 - Endpoint-binding regression test passed: refreshing imported nodes preserves node-scoped endpoint selections for future refreshes.
 - Worker deployed version `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
+- Public agent image `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` was published by GitHub Actions, anonymously pulled, and verified to report `cloudflared version 2026.6.0`
+- Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`
 
 Additional checks:
