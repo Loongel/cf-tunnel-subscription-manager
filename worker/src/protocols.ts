@@ -55,6 +55,13 @@ function targetServer(ctx: MutationContext): string | null {
   return ctx.endpoint?.value || ctx.tunnelHost || null;
 }
 
+function urlHostname(server: string): string {
+  if (server.includes(":") && !server.startsWith("[") && !server.endsWith("]")) {
+    return `[${server}]`;
+  }
+  return server;
+}
+
 function targetPort(rawPort: string | null, ctx: MutationContext): string {
   if (hasEdgeOverride(ctx)) return "443";
   return rawPort && rawPort !== "" ? rawPort : "443";
@@ -119,7 +126,7 @@ function mutateUrlUri(raw: string, ctx: MutationContext): string {
   const server = targetServer(ctx);
   const host = pickHostForContext(urlHostCandidates(url), ctx);
   if (server) {
-    url.hostname = server;
+    url.hostname = urlHostname(server);
     url.port = targetPort(url.port, ctx);
   }
   url.hash = `#${encodeURIComponent(displayName(ctx))}`;
@@ -157,12 +164,12 @@ function parseShadowsocks(raw: string, ctx: MutationContext): string {
     const server = targetServer(ctx);
     if (!details || !server) return raw;
     const credential = encodeBase64(`${details.method}:${details.password}`);
-    return `ss://${credential}@${server}:${targetPort(String(details.serverPort), ctx)}${query}${label}`;
+    return `ss://${credential}@${urlHostname(server)}:${targetPort(String(details.serverPort), ctx)}${query}${label}`;
   }
   const url = new URL(body);
   const server = targetServer(ctx);
   if (!server) return raw;
-  url.hostname = server;
+  url.hostname = urlHostname(server);
   url.port = targetPort(url.port, ctx);
   const params = url.searchParams;
   if (ctx.tunnelHost && params.has("plugin")) {

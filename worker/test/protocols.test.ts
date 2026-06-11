@@ -64,6 +64,21 @@ describe("protocol adapter", () => {
     expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
   });
 
+  it("wraps IPv6 endpoint addresses in share-link URL authority hosts", () => {
+    const raw = "vless://uuid@3xui.ora1.813711.xyz:1443?type=xhttp&security=tls&sni=v6.3xui.hk&host=v6.3xui.hk&path=%2F#old";
+    const result = mutateShareUri(raw, {
+      node: { ...node(raw), name: "vlessxhttp[fallback]-direct-out@usr", use_tunnel: 0, selected_tunnel_id: null },
+      endpoint: { ...endpoint, value: "2400:3200::1", label: "v6.3xui.hk" },
+      format: "v2ray"
+    });
+    expect(result.skipped).toBeFalsy();
+    expect(result.uri).toContain("@[2400:3200::1]:443");
+    expect(result.uri).not.toContain("@3xui.ora1.813711.xyz:1443");
+    const parsed = new URL(result.uri || "");
+    expect(parsed.hostname).toBe("[2400:3200::1]");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("vlessxhttp[fallback]-direct-out@usr | v6.3xui.hk");
+  });
+
   it("selects SNI deterministically for direct, endpoint-derived, and configured traffic nodes", () => {
     const raw = "vless://uuid@example.com:443?type=ws&security=tls&sni=first.example.com,second.example.com&host=first.example.com,second.example.com&path=%2F#old";
     const direct = mutateShareUri(raw, {
