@@ -216,7 +216,7 @@ describe("admin import refresh", () => {
       candidates: [
         {
           id: "candidate_1",
-          sourceName: "sui.hk",
+          sourceName: "https://sub.example.com/a.txt",
           sourceGroup: "sui.hk",
           sourceType: "v2ray_uri",
           name: "direct-out@usr",
@@ -225,7 +225,7 @@ describe("admin import refresh", () => {
         },
         {
           id: "candidate_2",
-          sourceName: "sui.hk",
+          sourceName: "https://sub.example.com/b.txt",
           sourceGroup: "sui.hk",
           sourceType: "v2ray_uri",
           name: "direct-out@usr",
@@ -238,6 +238,39 @@ describe("admin import refresh", () => {
     expect(result).toMatchObject({ imported: 2, updated: 0, skipped: 0 });
     expect(tables.nodes).toHaveLength(2);
     expect(new Set(tables.nodes.map((row) => row.import_key)).size).toBe(2);
-    expect(tables.nodes.map((row) => row.name)).toEqual(["direct-out@usr", "direct-out@usr"]);
+    expect(tables.nodes.map((row) => row.name).sort()).toEqual(["a direct-out@usr", "b direct-out@usr"]);
+  });
+
+  it("derives imported node names from the selected TLS carrier before duplicate fallback", async () => {
+    const tables: TableMap = { nodes: [], endpoints: [], endpointSelections: [] };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "managed-sub",
+      candidates: [
+        {
+          id: "carrier",
+          sourceName: "managed-sub",
+          sourceGroup: "managed-sub",
+          sourceType: "v2ray_uri",
+          name: "xxx-tls-entry",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000003@carrier.example:443?security=tls&type=ws&sni=carrier.example#carrier",
+          protocol: "vless",
+          asTlsCarrier: true
+        },
+        {
+          id: "child",
+          sourceName: "managed-sub",
+          sourceGroup: "managed-sub",
+          sourceType: "v2ray_uri",
+          name: "node-c",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000004@origin.example:80?type=ws#child",
+          protocol: "vless",
+          parentIds: ["carrier"]
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({ imported: 2, skipped: 0 });
+    expect(tables.nodes.map((row) => row.name)).toContain("node-c <xxx-tls-entry>");
   });
 });

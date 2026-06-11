@@ -48,6 +48,17 @@ interface ImportSourceContent {
   content: string;
 }
 
+interface ImportVariant {
+  name: string;
+  rawConfig: string;
+  item: ImportCandidate;
+  sourceName: string;
+  identity?: {
+    importKey: string;
+    contentHash: string;
+  };
+}
+
 export async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Response> {
   const path = url.pathname;
   if (request.method === "GET" && path === "/api/public/overview") {
@@ -403,6 +414,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   const errors: string[] = [];
   const byId = new Map(activeCandidates.map((item) => [item.id, item]));
   const seenImportKeys = new Set<string>();
+  const variants: ImportVariant[] = [];
   const newIdsByImportKey = new Map<string, string>();
   let skipped = 0;
   let created = 0;
@@ -434,46 +446,57 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       continue;
     }
 
-    const variants = validCarriers.length > 0
+    const itemVariants = validCarriers.length > 0
       ? validCarriers.map((carrier) => ({
-        name: validCarriers.length > 1 ? `${name} @ ${carrier.name}` : name,
-        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType)
+        name: importedCarrierVariantName(name, carrier.name),
+        rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType),
+        item,
+        sourceName: item.sourceName
       }))
-      : [{ name, rawConfig: item.rawConfig }];
+      : [{ name, rawConfig: item.rawConfig, item, sourceName: item.sourceName }];
+    variants.push(...itemVariants);
+  }
 
-    for (const variant of variants) {
-      try {
-        const identity = await importIdentity(remark || item.sourceGroup || item.sourceName, variant.rawConfig, item.sourceType);
-        if (seenImportKeys.has(identity.importKey)) {
-          skipped += 1;
-          continue;
-        }
-        seenImportKeys.add(identity.importKey);
-        const stableId = await stableImportedNodeId(identity.importKey);
-        const restoredEndpointIds = deletedEndpointIdsByImportKey.get(identity.importKey) || [];
-        newIdsByImportKey.set(identity.importKey, stableId);
-        const payload = {
-          name: variant.name,
-          remark: remark || item.sourceName,
-          rawConfig: variant.rawConfig,
-          sourceType: item.sourceType,
-          importKey: identity.importKey,
-          importSourceName: remark || item.sourceGroup || item.sourceName,
-          rawConfigHash: identity.contentHash,
-          protocol: item.protocol,
-          enabled: body.enabled === undefined ? true : body.enabled,
-          useTunnel: false,
-          ...(restoredEndpointIds.length > 0 ? { selectedEndpointIds: restoredEndpointIds as unknown as JsonValue } : {}),
-          id: stableId
-        };
-        const result = await upsertImportedProxyNode(env, payload);
-        imported.push(result.row);
-        if (result.created) created += 1;
-        else updated += 1;
-      } catch (error) {
-        skipped += 1;
-        errors.push(`${variant.name}: ${error instanceof Error ? error.message : "import failed"}`);
-      }
+  for (const variant of variants) {
+    const identity = await importIdentity(remark || variant.item.sourceGroup || variant.item.sourceName, variant.rawConfig, variant.item.sourceType);
+    if (seenImportKeys.has(identity.importKey)) {
+      skipped += 1;
+      continue;
+    }
+    seenImportKeys.add(identity.importKey);
+    variant.identity = identity;
+  }
+
+  disambiguateImportVariantNames(variants.filter((variant) => variant.identity));
+
+  for (const variant of variants) {
+    if (!variant.identity) continue;
+    const item = variant.item;
+    try {
+      const stableId = await stableImportedNodeId(variant.identity.importKey);
+      const restoredEndpointIds = deletedEndpointIdsByImportKey.get(variant.identity.importKey) || [];
+      newIdsByImportKey.set(variant.identity.importKey, stableId);
+      const payload = {
+        name: variant.name,
+        remark: remark || item.sourceName,
+        rawConfig: variant.rawConfig,
+        sourceType: item.sourceType,
+        importKey: variant.identity.importKey,
+        importSourceName: remark || item.sourceGroup || item.sourceName,
+        rawConfigHash: variant.identity.contentHash,
+        protocol: item.protocol,
+        enabled: body.enabled === undefined ? true : body.enabled,
+        useTunnel: false,
+        ...(restoredEndpointIds.length > 0 ? { selectedEndpointIds: restoredEndpointIds as unknown as JsonValue } : {}),
+        id: stableId
+      };
+      const result = await upsertImportedProxyNode(env, payload);
+      imported.push(result.row);
+      if (result.created) created += 1;
+      else updated += 1;
+    } catch (error) {
+      skipped += 1;
+      errors.push(`${variant.name}: ${error instanceof Error ? error.message : "import failed"}`);
     }
   }
 
@@ -482,6 +505,45 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   }
 
   return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
+}
+
+function importedCarrierVariantName(childName: string, carrierName: string): string {
+  return `${childName.trim()} <${carrierName.trim()}>`;
+}
+
+function disambiguateImportVariantNames(variants: ImportVariant[]): void {
+  const byName = new Map<string, ImportVariant[]>();
+  for (const variant of variants) {
+    const items = byName.get(variant.name) || [];
+    items.push(variant);
+    byName.set(variant.name, items);
+  }
+  for (const items of byName.values()) {
+    if (items.length <= 1) continue;
+    const seen = new Set<string>();
+    for (const item of items) {
+      const suffix = item.identity ? item.identity.contentHash.slice(0, 6) : "";
+      const sourceLabel = compactImportSourceLabel(item.sourceName);
+      let nextName = sourceLabel ? `${sourceLabel} ${item.name}` : item.name;
+      if (seen.has(nextName) && suffix) nextName = `${item.name} #${suffix}`;
+      while (seen.has(nextName) && item.identity) {
+        nextName = `${item.name} #${item.identity.contentHash.slice(0, 10)}`;
+      }
+      item.name = nextName;
+      seen.add(nextName);
+    }
+  }
+}
+
+function compactImportSourceLabel(sourceName: string): string {
+  try {
+    const url = new URL(sourceName);
+    const segments = url.pathname.split("/").map((item) => item.trim()).filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    return (lastSegment || url.hostname).replace(/\.(txt|list|conf|json)$/i, "").slice(0, 32);
+  } catch {
+    return sourceName.length > 32 ? sourceName.slice(0, 32) : sourceName;
+  }
 }
 
 function replacementRemarks(body: JsonRecord, remark: string): string[] {
@@ -718,51 +780,15 @@ async function buildImportCandidates(env: Env, body: JsonRecord): Promise<{
     }
   }
 
-  applyDisplayNameDisambiguation(candidates, currentImportRules(isRecord(body.rules) ? body.rules as JsonRecord : {}));
+  applySavedImportDisplayNames(candidates, currentImportRules(isRecord(body.rules) ? body.rules as JsonRecord : {}));
   return { candidates, errors };
 }
 
-function applyDisplayNameDisambiguation(candidates: ImportCandidate[], rules: JsonRecord): void {
+function applySavedImportDisplayNames(candidates: ImportCandidate[], rules: JsonRecord): void {
   const displayNamesByKey = isRecord(rules.displayNamesByKey) ? rules.displayNamesByKey as JsonRecord : {};
-  const byOriginalName = new Map<string, ImportCandidate[]>();
-  for (const candidate of candidates) {
-    const items = byOriginalName.get(candidate.originalName) || [];
-    items.push(candidate);
-    byOriginalName.set(candidate.originalName, items);
-  }
-
-  const used = new Set<string>();
   for (const candidate of candidates) {
     const savedName = optionalString(displayNamesByKey[candidate.importKey]);
-    if (savedName) {
-      candidate.name = savedName;
-      used.add(savedName);
-    }
-  }
-
-  for (const group of byOriginalName.values()) {
-    for (const candidate of group) {
-      if (optionalString(displayNamesByKey[candidate.importKey])) continue;
-      let name = candidate.originalName;
-      if (group.length > 1) {
-        const sourceLabel = compactImportSourceLabel(candidate.sourceName);
-        name = sourceLabel ? `${sourceLabel} ${candidate.originalName}` : `${candidate.originalName} #${candidate.contentHash.slice(0, 6)}`;
-      }
-      if (used.has(name)) name = `${name} #${candidate.contentHash.slice(0, 6)}`;
-      candidate.name = name;
-      used.add(name);
-    }
-  }
-}
-
-function compactImportSourceLabel(sourceName: string): string {
-  try {
-    const url = new URL(sourceName);
-    const segments = url.pathname.split("/").map((item) => item.trim()).filter(Boolean);
-    const lastSegment = segments[segments.length - 1];
-    return (lastSegment || url.hostname).replace(/\.(txt|list|conf|json)$/i, "").slice(0, 32);
-  } catch {
-    return sourceName.length > 32 ? sourceName.slice(0, 32) : sourceName;
+    if (savedName) candidate.name = savedName;
   }
 }
 
