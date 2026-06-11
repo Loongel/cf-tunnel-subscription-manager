@@ -34,6 +34,12 @@ interface CountRow {
   pending?: number;
 }
 
+interface DeletedImportedNodeRow {
+  id: string;
+  name: string;
+  selectedEndpointIds: string[];
+}
+
 export async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Response> {
   const path = url.pathname;
   if (request.method === "GET" && path === "/api/public/overview") {
@@ -343,12 +349,14 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   let created = 0;
   let updated = 0;
   let deletedOld = 0;
-  let deletedRows: Array<{ id: string; name: string }> = [];
+  let deletedRows: DeletedImportedNodeRow[] = [];
 
   if (body.replaceExistingForRemark === true && remark) {
     deletedRows = await deleteImportedNodesByRemarks(env, replacementRemarks(body, remark));
     deletedOld = deletedRows.length;
   }
+
+  const deletedEndpointIdsByName = endpointSelectionsByDeletedName(deletedRows);
 
   for (const item of activeCandidates) {
     const name = item.name.trim();
@@ -382,6 +390,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
       seenNames.add(variant.name);
       try {
         const stableId = await stableImportedNodeId(remark || item.sourceName, variant.name);
+        const restoredEndpointIds = deletedEndpointIdsByName.get(variant.name) || [];
         newIdsByName.set(variant.name, stableId);
         const payload = {
           name: variant.name,
@@ -391,7 +400,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
           protocol: item.protocol,
           enabled: body.enabled === undefined ? true : body.enabled,
           useTunnel: false,
-          selectedEndpointIds: [],
+          ...(restoredEndpointIds.length > 0 ? { selectedEndpointIds: restoredEndpointIds as unknown as JsonValue } : {}),
           id: stableId
         };
         const result = body.replaceExistingForRemark === true && remark
@@ -418,7 +427,7 @@ function replacementRemarks(body: JsonRecord, remark: string): string[] {
   return Array.from(new Set([remark, ...parseEndpointValues(body.replaceExistingRemarks)]));
 }
 
-async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<Array<{ id: string; name: string }>> {
+async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<DeletedImportedNodeRow[]> {
   if (remarks.length === 0) return [];
   const placeholders = remarks.map(() => "?").join(", ");
   const rows = await all<{ id: string; name: string }>(
@@ -426,8 +435,47 @@ async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promis
     `SELECT id, name FROM proxy_nodes WHERE remark IN (${placeholders})`,
     ...remarks
   );
+  const selectedEndpointIdsByNodeId = await selectedNodeScopedEndpointIds(env, rows.map((row) => row.id));
   await run(env.DB, `DELETE FROM proxy_nodes WHERE remark IN (${placeholders})`, ...remarks);
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    selectedEndpointIds: selectedEndpointIdsByNodeId.get(row.id) || []
+  }));
+}
+
+async function selectedNodeScopedEndpointIds(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
+  const output = new Map<string, string[]>();
+  if (nodeIds.length === 0) return output;
+  const placeholders = nodeIds.map(() => "?").join(", ");
+  const rows = await all<{ proxy_node_id: string; endpoint_id: string }>(
+    env.DB,
+    `SELECT s.proxy_node_id, s.endpoint_id
+     FROM proxy_node_endpoint_selections s
+     JOIN preferred_endpoints e ON e.id = s.endpoint_id
+     WHERE s.enabled = 1
+       AND e.scope = 'node'
+       AND s.proxy_node_id IN (${placeholders})`,
+    ...nodeIds
+  );
+  for (const row of rows) {
+    const ids = output.get(row.proxy_node_id) || [];
+    ids.push(row.endpoint_id);
+    output.set(row.proxy_node_id, ids);
+  }
+  return output;
+}
+
+function endpointSelectionsByDeletedName(rows: DeletedImportedNodeRow[]): Map<string, string[]> {
+  const output = new Map<string, string[]>();
+  for (const row of rows) {
+    if (row.selectedEndpointIds.length === 0) continue;
+    const ids = output.get(row.name) || [];
+    for (const endpointId of row.selectedEndpointIds) {
+      if (!ids.includes(endpointId)) ids.push(endpointId);
+    }
+    output.set(row.name, ids);
+  }
+  return output;
 }
 
 async function stableImportedNodeId(sourceName: string, nodeName: string): Promise<string> {
@@ -479,6 +527,10 @@ async function migrateGroupDerivedNodeIds(
     }
   }
 }
+
+export const __adminApiTestHooks = {
+  importProxyNodes
+};
 
 async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
   candidates: ImportCandidate[];

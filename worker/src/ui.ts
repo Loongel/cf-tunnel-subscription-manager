@@ -185,33 +185,36 @@ export function renderAdminUi(env: Env): string {
     .row-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
     .row-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
     .derived-grid { display: grid; gap: 9px; max-height: 430px; overflow: auto; padding-right: 2px; }
-    .chip-row { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 10px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 9px; }
+    .chip-row { display: grid; gap: 9px; align-items: start; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 9px; }
     .chip-row-title { min-width: 0; }
-    .chip-row-title strong { display: block; color: var(--accent-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip-row-title span { color: var(--muted); font-size: 12px; }
+    .chip-row-title strong { display: block; color: var(--accent-2); font-size: 12px; letter-spacing: 0; overflow-wrap: anywhere; line-height: 1.25; }
+    .chip-row-title span { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
     .chip-options { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
-    .select-chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 11px; min-height: 31px; color: var(--muted); background: #1a2435; font-size: 12px; line-height: 1; }
+    .select-chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 11px; min-height: 31px; max-width: 100%; color: var(--muted); background: #1a2435; font-size: 12px; line-height: 1.2; text-align: left; }
     .select-chip:hover { color: var(--text); border-color: var(--accent); }
     .select-chip.selected { color: var(--selected-text); border-color: #fb923c; background: var(--selected); box-shadow: 0 0 0 2px var(--selected-soft); }
     .select-chip .chip-main { font-weight: 700; }
-    .select-chip .chip-sub { margin-left: 6px; color: rgba(231, 237, 243, 0.72); }
+    .select-chip .chip-sub { margin-left: 6px; color: rgba(231, 237, 243, 0.72); overflow-wrap: anywhere; }
     .select-chip span { pointer-events: none; }
     .group-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-    .group-chip { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 8px; color: var(--accent-2); background: rgba(96, 165, 250, 0.1); font-size: 12px; max-width: 280px; }
-    .group-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .group-member { display: inline-grid; grid-template-columns: minmax(160px, 260px) minmax(0, 1fr); gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 6px; max-width: 100%; }
+    .group-member-name { color: var(--text); font-size: 12px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+    .group-member-tags { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+    .group-chip { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 8px; color: var(--accent-2); background: rgba(96, 165, 250, 0.1); font-size: 12px; max-width: min(360px, 100%); line-height: 1.2; }
+    .group-chip span { overflow-wrap: anywhere; }
     .link-chip-grid { display: grid; gap: 9px; }
     .link-chip-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 10px; align-items: center; }
     .link-chip-row strong { color: var(--muted); font-size: 12px; text-transform: uppercase; }
     .link-chips { display: flex; flex-wrap: wrap; gap: 7px; }
     .import-review { display: grid; gap: 10px; margin-top: 12px; }
     .import-list { display: grid; gap: 7px; }
-    .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 310px) auto auto; gap: 8px; align-items: center; }
+    .import-row { display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 0.8fr) auto auto; gap: 8px; align-items: start; }
     .import-row.child { padding-left: 28px; border-left: 2px solid var(--selected); }
-    .import-node { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 9px; }
+    .import-node { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 7px 9px; }
     .import-node.carrier { border-color: #fb923c; background: var(--selected-soft); }
     .import-node.removed { opacity: 0.64; }
-    .import-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .import-node .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .import-node strong { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
+    .import-node .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .import-node .dup { color: var(--warn); font-size: 12px; white-space: nowrap; }
     .tls-controls { display: grid; gap: 6px; }
     @media (max-width: 1020px) {
@@ -844,7 +847,7 @@ export function renderAdminUi(env: Env): string {
         return '<select data-import-parent="' + esc(item.id) + '" data-import-parent-index="' + String(index) + '">' + parentOptions + '</select>';
       }).join('');
       const canAddTls = !item.asTlsCarrier && carriers.length > selectedParents.length;
-      const tlsMeta = item.sni ? 'sni ' + item.sni : null;
+      const tlsMeta = compactSni(item.sni);
       const meta = [item.protocol, item.transport, item.server ? item.server + (item.port ? ':' + item.port : '') : null, tlsMeta].filter(Boolean).join(' / ');
       return '<div class="import-row' + (hasParent ? ' child' : '') + '">' +
         '<div class="import-node' + (item.asTlsCarrier ? ' carrier' : '') + '" title="' + esc(item.rawConfig) + '">' +
@@ -858,9 +861,15 @@ export function renderAdminUi(env: Env): string {
       '</div>';
     }
     function importRemovedRowHtml(item) {
-      const tlsMeta = item.sni ? 'sni ' + item.sni : null;
+      const tlsMeta = compactSni(item.sni);
       const meta = [item.protocol, item.server ? item.server + (item.port ? ':' + item.port : '') : null, tlsMeta].filter(Boolean).join(' / ');
       return '<div class="import-row"><div class="import-node removed"><strong>' + esc(item.name) + '</strong><span class="meta">' + esc(meta || item.sourceName) + '</span></div><span></span><button data-restore-import="' + esc(item.id) + '">Restore</button></div>';
+    }
+    function compactSni(value) {
+      if (!value) return null;
+      const items = String(value).split(/[,，\\s]+/).map((item) => item.trim()).filter(Boolean);
+      if (items.length <= 1) return 'sni ' + String(value);
+      return 'sni ' + items[0] + ' +' + (items.length - 1);
     }
     function importKeywords() {
       return byId('importFilterText').value.split(/[\s,，;；]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
@@ -1006,14 +1015,23 @@ export function renderAdminUi(env: Env): string {
         : (row.derivedNodeIds || []);
     }
     function derivedFullLabel(item) {
-      const parts = [];
-      if (item.tunnelHost) parts.push('SNI ' + item.tunnelHost);
-      if (item.endpointId || item.endpointValue) parts.push(endpointLabel(item.endpointId) || item.endpointLabel || item.endpointValue || item.endpointId);
+      const parts = derivedParts(item).map((part) => part.label);
       if (parts.length === 0) parts.push('Direct');
       return parts.join(' / ');
     }
     function derivedShortLabel(item) {
       return derivedFullLabel(item);
+    }
+    function derivedParts(item) {
+      const parts = [];
+      if (item.tunnelHost) parts.push({ label: item.tunnelHost, value: item.tunnelHost });
+      if (item.endpointId || item.endpointValue) {
+        const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
+        const label = endpoint ? (endpoint.label || endpoint.value) : (item.endpointLabel || item.endpointValue || item.endpointId);
+        const value = endpoint ? endpoint.value : (item.endpointValue || item.endpointId);
+        parts.push({ label, value });
+      }
+      return parts;
     }
     function endpointLabel(id) {
       const endpoint = state.endpoints.find((item) => item.id === id);
@@ -1021,11 +1039,25 @@ export function renderAdminUi(env: Env): string {
     }
     function derivedChipHtml(item, selected, index) {
       const title = derivedFullLabel(item);
-      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(title) + '"><span class="chip-main">' + esc(title) + '</span></button>';
+      const parts = derivedParts(item);
+      const main = parts.length > 0 ? parts.map((part) => part.label).join(' | ') : 'Direct';
+      const rawValues = parts
+        .map((part) => part.value && part.value !== part.label ? part.value : null)
+        .filter(Boolean)
+        .join(' | ');
+      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(generatedLabel(item.id)) + '"><span class="chip-main">' + esc(main) + '</span>' + (rawValues ? '<span class="chip-sub">' + esc(rawValues) + '</span>' : '') + '</button>';
     }
     function groupChipsHtml(ids) {
       if (!ids || ids.length === 0) return '<span class="muted small">-</span>';
-      return '<div class="group-chip-row">' + ids.map((id) => '<span class="group-chip" title="' + esc(generatedLabel(id)) + '"><span>' + esc(generatedLabel(id)) + '</span></span>').join('') + '</div>';
+      return '<div class="group-chip-row">' + ids.map((id) => {
+        const item = state.generatedNodes.find((node) => node.id === id);
+        if (!item) return '<span class="group-chip" title="' + esc(id) + '"><span>' + esc(id) + '</span></span>';
+        const tags = derivedParts(item);
+        const tagHtml = (tags.length > 0 ? tags : [{ label: 'Direct', value: 'Direct' }]).map((part) =>
+          '<span class="group-chip" title="' + esc(part.value || part.label) + '"><span>' + esc(part.label) + '</span></span>'
+        ).join('');
+        return '<span class="group-member" title="' + esc(generatedLabel(id)) + '"><span class="group-member-name">' + esc(item.sourceName) + '</span><span class="group-member-tags">' + tagHtml + '</span></span>';
+      }).join('') + '</div>';
     }
 
     document.body.addEventListener('change', (e) => {
