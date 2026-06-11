@@ -5,6 +5,7 @@ import { nowIso } from "./utils";
 export interface TunnelIdentity {
   swarm_node_name?: string | null;
   target_url?: string | null;
+  remark?: string | null;
 }
 
 export function tunnelTrafficKey(tunnel: TunnelIdentity): string | null {
@@ -15,6 +16,7 @@ export function tunnelTrafficKey(tunnel: TunnelIdentity): string | null {
 }
 
 export function tunnelTrafficLabel(tunnel: TunnelIdentity): string {
+  if (tunnel.remark && tunnel.remark.trim()) return tunnel.remark.trim();
   const swarmNode = (tunnel.swarm_node_name || "unknown-node").trim();
   const targetUrl = (tunnel.target_url || "unknown-target").trim();
   return `${swarmNode} -> ${targetUrl}`;

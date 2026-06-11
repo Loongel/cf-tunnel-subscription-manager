@@ -4,7 +4,7 @@ import { cleanupStaleTunnels } from "./tunnel-registry";
 import type { Env, TunnelRow } from "./types";
 import { makeId, nowIso, safeJson } from "./utils";
 
-const HEALTHY_STATUS = new Set([200, 204, 301, 302, 401, 403]);
+const HEALTHY_STATUS = new Set([200, 204, 301, 302, 401, 403, 404]);
 const RESTART_FAILURE_THRESHOLD = 3;
 const RESTART_COOLDOWN_SECONDS = 610;
 const AGENT_STALE_SECONDS = 360;

@@ -254,6 +254,10 @@ export function renderAdminUi(env: Env): string {
         <div class="metric"><div class="muted">Commands Pending</div><div id="metricCommands" class="value">0</div></div>
       </div>
       <div class="section">
+        <div class="toolbar"><h2>Agents</h2><button id="refreshAgents">Refresh</button></div>
+        <table><thead><tr><th>ID</th><th>Hostname</th><th>Swarm Node</th><th>Status</th><th>Last Seen</th><th>Actions</th></tr></thead><tbody id="agentsBody"></tbody></table>
+      </div>
+      <div class="section">
         <div class="toolbar"><h2>Recent Events</h2><button id="refreshDashboard">Refresh</button></div>
         <table><thead><tr><th>Time</th><th>Severity</th><th>Event</th><th>Message</th></tr></thead><tbody id="eventsBody"></tbody></table>
       </div>
@@ -262,7 +266,7 @@ export function renderAdminUi(env: Env): string {
     <section id="tunnels" class="view hidden">
       <div class="section">
         <div class="toolbar"><h2>Tunnels</h2><button id="refreshTunnels">Refresh</button></div>
-        <table><thead><tr><th>Type</th><th>Health</th><th>Swarm Node</th><th>Target</th><th>Public Host</th><th>Seen</th><th>Actions</th></tr></thead><tbody id="tunnelsBody"></tbody></table>
+        <table><thead><tr><th>Type</th><th>Health</th><th>Remark / Association</th><th>Public Host</th><th>Seen</th><th>Actions</th></tr></thead><tbody id="tunnelsBody"></tbody></table>
       </div>
     </section>
 
@@ -467,7 +471,7 @@ export function renderAdminUi(env: Env): string {
 
   <script>
     const BASE_URL = ${JSON.stringify(baseUrl)};
-    const state = { overview: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [] };
+    const state = { overview: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [], agents: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
     let editingGroupId = null;
@@ -484,6 +488,7 @@ export function renderAdminUi(env: Env): string {
     const metricUnhealthy = byId('metricUnhealthy');
     const metricCommands = byId('metricCommands');
     const eventsBody = byId('eventsBody');
+    const agentsBody = byId('agentsBody');
     const tunnelsBody = byId('tunnelsBody');
     const snisBody = byId('snisBody');
     const nodesBody = byId('nodesBody');
@@ -547,7 +552,8 @@ export function renderAdminUi(env: Env): string {
     }
     function clearPrivateViews() {
       eventsBody.innerHTML = lockedRow(4);
-      tunnelsBody.innerHTML = lockedRow(7);
+      agentsBody.innerHTML = lockedRow(6);
+      tunnelsBody.innerHTML = lockedRow(6);
       nodesBody.innerHTML = lockedRow(6);
       endpointsBody.innerHTML = lockedRow(5);
       groupsBody.innerHTML = lockedRow(4);
@@ -560,6 +566,7 @@ export function renderAdminUi(env: Env): string {
       state.importSources = [];
       state.groups = [];
       state.generatedNodes = [];
+      state.agents = [];
       renderTunnelOptions();
       renderBindingNodeList();
       renderEndpointOptions();
@@ -581,6 +588,14 @@ export function renderAdminUi(env: Env): string {
       applyMetrics(data);
       return data;
     }
+    async function refreshAgents() {
+      const data = await api('/api/admin/agents');
+      state.agents = data.agents || [];
+      agentsBody.innerHTML = state.agents.map((row) => {
+        const isOffline = row.status !== 'online';
+        return '<tr><td class="mono">' + esc(row.id) + '</td><td>' + esc(row.hostname || '-') + '</td><td>' + esc(row.swarm_node_name || '-') + '</td><td>' + statusPill(row.status) + '</td><td>' + esc(row.last_seen_at || '-') + '</td><td class="row-actions">' + (isOffline ? '<button data-delete-agent="' + esc(row.id) + '" class="danger">Remove</button>' : '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="muted">No agents.</td></tr>';
+    }
     async function refreshDashboard() {
       const data = await api('/api/admin/overview');
       applyMetrics(data);
@@ -593,9 +608,10 @@ export function renderAdminUi(env: Env): string {
       const data = await api('/api/admin/tunnels');
       state.tunnels = data.tunnels || [];
       renderTunnelOptions();
-      tunnelsBody.innerHTML = state.tunnels.map((row) =>
-        '<tr><td>' + esc(row.type) + '</td><td>' + statusPill(row.health_status) + '</td><td>' + esc(row.swarm_node_name || row.agent_id) + '</td><td class="mono">' + esc(row.target_url) + '</td><td class="mono">' + esc(row.public_hostname) + '</td><td>' + esc(row.last_seen_at) + '</td><td class="row-actions"><button data-copy="' + esc(row.public_hostname || '') + '">Copy</button>' + (row.type === 'quick' ? '<button data-restart="' + esc(row.id) + '">Restart</button>' : '') + '</td></tr>'
-      ).join('') || '<tr><td colspan="7" class="muted">No tunnels.</td></tr>';
+      tunnelsBody.innerHTML = state.tunnels.map((row) => {
+        const displayLabel = row.remark || row.traffic_label || ((row.swarm_node_name || row.agent_id) + ' -> ' + (row.target_url || '-'));
+        return '<tr><td>' + esc(row.type) + '</td><td>' + statusPill(row.health_status) + '</td><td>' + esc(displayLabel) + '</td><td class="mono">' + esc(row.public_hostname) + '</td><td>' + esc(row.last_seen_at) + '</td><td class="row-actions"><button data-copy="' + esc(row.public_hostname || '') + '">Copy</button><button data-edit-tunnel-remark="' + esc(row.id) + '">Remark</button>' + (row.type === 'quick' ? '<button data-restart="' + esc(row.id) + '">Restart</button>' : '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="muted">No tunnels.</td></tr>';
     }
     async function refreshSnis() {
       const data = await api('/api/admin/custom-snis');
@@ -667,7 +683,8 @@ export function renderAdminUi(env: Env): string {
       }).join('');
       const sniOptions = state.snis.filter((s) => s.enabled).map((s) => {
         const value = 'sni:' + s.id;
-        const label = 'SNI: ' + (s.name || s.hostname) + ' / ' + s.hostname;
+        const display = s.remark || s.name || s.hostname;
+        const label = 'SNI: ' + display;
         if (query && !selected.has(value) && !label.toLowerCase().includes(query)) return '';
         return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
       }).join('');
@@ -1017,7 +1034,10 @@ export function renderAdminUi(env: Env): string {
     }
     function derivedParts(item) {
       const parts = [];
-      if (item.tunnelHost) parts.push({ label: item.tunnelHost, value: item.tunnelHost });
+      if (item.tunnelHost) {
+        const label = item.trafficLabel || item.tunnelHost;
+        parts.push({ label: label, value: item.tunnelHost });
+      }
       if (item.endpointId || item.endpointValue) {
         const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
         const label = endpoint ? (endpoint.label || endpoint.value) : (item.endpointLabel || item.endpointValue || item.endpointId);
@@ -1034,11 +1054,7 @@ export function renderAdminUi(env: Env): string {
       const title = derivedFullLabel(item);
       const parts = derivedParts(item);
       const main = parts.length > 0 ? parts.map((part) => part.label).join(' | ') : 'Direct';
-      const rawValues = parts
-        .map((part) => part.value && part.value !== part.label ? part.value : null)
-        .filter(Boolean)
-        .join(' | ');
-      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(generatedLabel(item.id)) + '"><span class="chip-main">' + esc(main) + '</span>' + (rawValues ? '<span class="chip-sub">' + esc(rawValues) + '</span>' : '') + '</button>';
+      return '<button type="button" class="select-chip' + (selected ? ' selected' : '') + '" data-derived-id="' + esc(item.id) + '" title="' + esc(generatedLabel(item.id)) + '"><span class="chip-main">' + esc(main) + '</span></button>';
     }
     function groupChipsHtml(ids) {
       if (!ids || ids.length === 0) return '<span class="muted small">-</span>';
@@ -1109,6 +1125,31 @@ export function renderAdminUi(env: Env): string {
         if (t.dataset.copy) {
           await navigator.clipboard.writeText(t.dataset.copy);
           setNotice('Copied.', 'ok');
+        }
+        if (t.dataset.editTunnelRemark) {
+          const id = t.dataset.editTunnelRemark;
+          const tunnel = state.tunnels.find((row) => row.id === id);
+          if (tunnel) {
+            const current = tunnel.remark || tunnel.traffic_label || '';
+            const newRemark = prompt('Enter a display remark for this tunnel (leave empty to use default association label):', current);
+            if (newRemark !== null) {
+              await api('/api/admin/tunnels/' + esc(id), {
+                method: 'PATCH',
+                body: JSON.stringify({ remark: newRemark.trim() || null })
+              });
+              setNotice('Tunnel remark updated.', 'ok');
+              await refreshTunnels();
+            }
+          }
+        }
+        if (t.dataset.deleteAgent) {
+          const id = t.dataset.deleteAgent;
+          if (confirm('Remove this offline agent? Any remaining tunnels will also be deleted.')) {
+            await api('/api/admin/agents/' + esc(id), { method: 'DELETE' });
+            setNotice('Agent removed.', 'ok');
+            await refreshAgents();
+            await refreshDashboard();
+          }
         }
         if (t.dataset.derivedId) {
           t.classList.toggle('selected');
@@ -1547,6 +1588,7 @@ export function renderAdminUi(env: Env): string {
       }
     };
     byId('refreshDashboard').onclick = () => hasToken() ? refreshDashboard().catch((err) => setNotice(formatError(err), 'error')) : refreshAll();
+    byId('refreshAgents').onclick = () => refreshAgents().catch((err) => setNotice(formatError(err), 'error'));
     byId('refreshTunnels').onclick = () => refreshTunnels().catch((err) => setNotice(formatError(err), 'error'));
     byId('refreshSnis').onclick = async () => {
       try { await refreshSnis(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
@@ -1572,6 +1614,7 @@ export function renderAdminUi(env: Env): string {
       }
       try {
         await refreshDashboard();
+        await refreshAgents();
         await refreshTunnels();
         await refreshEndpoints();
         await refreshSnis();

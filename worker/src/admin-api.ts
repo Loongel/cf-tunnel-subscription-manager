@@ -72,7 +72,8 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
       tunnels: tunnels.map((tunnel) => {
         const identity = {
           swarm_node_name: typeof tunnel.swarm_node_name === "string" ? tunnel.swarm_node_name : null,
-          target_url: typeof tunnel.target_url === "string" ? tunnel.target_url : null
+          target_url: typeof tunnel.target_url === "string" ? tunnel.target_url : null,
+          remark: typeof tunnel.remark === "string" ? tunnel.remark : null
         };
         return {
           ...tunnel,
@@ -96,6 +97,33 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
   const restartMatch = /^\/api\/admin\/tunnels\/([^/]+)\/restart$/.exec(path);
   if (request.method === "POST" && restartMatch) {
     return await createRestartCommand(env, restartMatch[1], "admin");
+  }
+
+  const tunnelMatch = /^\/api\/admin\/tunnels\/([^/]+)$/.exec(path);
+  if (tunnelMatch) {
+    const id = tunnelMatch[1];
+    if (request.method === "PATCH") {
+      const body = await readJson(request);
+      const remark = body.remark === null ? null : optionalString(body.remark);
+      await run(
+        env.DB,
+        "UPDATE tunnels SET remark = ?, updated_at = ? WHERE id = ?",
+        remark === undefined ? null : remark,
+        nowIso(),
+        id
+      );
+      const tunnel = await first(env.DB, "SELECT * FROM tunnels WHERE id = ?", id);
+      return json({ tunnel });
+    }
+  }
+
+  const agentMatch = /^\/api\/admin\/agents\/([^/]+)$/.exec(path);
+  if (agentMatch) {
+    const id = agentMatch[1];
+    if (request.method === "DELETE") {
+      await run(env.DB, "DELETE FROM agents WHERE id = ?", id);
+      return empty();
+    }
   }
 
   if (path === "/api/admin/proxy-nodes") {
@@ -1231,20 +1259,10 @@ function resolveGroupDerivedIds(
 ): { derivedNodeIds: string[]; effectiveDerivedNodeIds: string[]; staleDerivedNodeIds: string[] } {
   const currentIds = new Set(generated.map((item) => item.id));
   const exact = savedIds.filter((id) => currentIds.has(id));
-  if (exact.length > 0 || savedIds.length === 0) {
-    return {
-      derivedNodeIds: savedIds,
-      effectiveDerivedNodeIds: exact,
-      staleDerivedNodeIds: savedIds.filter((id) => !currentIds.has(id))
-    };
-  }
-
-  const sourceNodeIds = new Set(savedIds.map(sourceNodeIdFromGeneratedId).filter((id): id is string => Boolean(id)));
-  const fallback = generated.filter((item) => sourceNodeIds.has(item.sourceNodeId)).map((item) => item.id);
   return {
     derivedNodeIds: savedIds,
-    effectiveDerivedNodeIds: fallback,
-    staleDerivedNodeIds: savedIds
+    effectiveDerivedNodeIds: exact,
+    staleDerivedNodeIds: savedIds.filter((id) => !currentIds.has(id))
   };
 }
 

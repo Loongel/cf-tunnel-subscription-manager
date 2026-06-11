@@ -53,6 +53,7 @@ export interface TunnelRow {
   public_url: string | null;
   public_hostname: string | null;
   swarm_node_name: string | null;
+  remark: string | null;
   metrics_port: number | null;
   process_status: string;
   health_status: string;
@@ -143,6 +144,7 @@ export interface GeneratedNode {
   endpointLabel?: string;
   endpointType?: "ip" | "domain";
   tunnelHost?: string;
+  trafficLabel?: string;
   protocol: string;
   uri?: string;
   outbound?: JsonRecord;

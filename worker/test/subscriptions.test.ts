@@ -186,6 +186,7 @@ function tunnel(
     public_url: `https://${publicHostname}`,
     public_hostname: publicHostname,
     swarm_node_name: swarmNode,
+    remark: null,
     metrics_port: 2101,
     process_status: "running",
     health_status: healthStatus,
