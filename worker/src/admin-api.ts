@@ -466,9 +466,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
           ...(restoredEndpointIds.length > 0 ? { selectedEndpointIds: restoredEndpointIds as unknown as JsonValue } : {}),
           id: stableId
         };
-        const result = body.replaceExistingForRemark === true && remark
-          ? { row: await createProxyNode(env, payload), created: true }
-          : await upsertImportedProxyNode(env, payload);
+        const result = await upsertImportedProxyNode(env, payload);
         imported.push(result.row);
         if (result.created) created += 1;
         else updated += 1;
