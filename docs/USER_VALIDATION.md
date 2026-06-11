@@ -10,10 +10,10 @@ URL:
 https://cf-tunnel-control-plane.officesline.workers.dev/admin
 ```
 
-The admin token is stored on `hd01` only and is not committed to Git:
+The admin token is stored in local operational secret files and is not committed to Git. Use the local file when validating the UI:
 
 ```bash
-ssh hd01 "awk -F= '/^ADMIN_TOKEN=/{print \$2}' /root/.cf-tunnel-control-plane.secrets"
+awk -F= '/^ADMIN_TOKEN=/{print "ADMIN_TOKEN=<set>"}' .secrets/worker.env
 ```
 
 The dashboard metric cards are public. Before login they should still show aggregate counts from `/api/public/overview`. Login is required for event details, tunnel actions, proxy node management, endpoint management, and subscription URLs.
@@ -90,7 +90,7 @@ Remove demo UI config rows if desired:
 ```bash
 ssh hd01 '
 cd /root/builds/cf-tunnel-subscription-manager/worker
-export CLOUDFLARE_ACCOUNT_ID=9e0d7a7708a7cdbf66f1298514aefebb
+export CLOUDFLARE_ACCOUNT_ID=<account id>
 export CLOUDFLARE_API_TOKEN=<token with D1 access>
 npx wrangler d1 execute cf-tunnel-control-plane --remote --command "
 DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE name LIKE '\''demo-%'\'');

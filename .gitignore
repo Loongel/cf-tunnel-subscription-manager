@@ -6,6 +6,7 @@ dist/
 .env
 .env.*
 !.env.template
+.secrets/
 coverage/
 *.log
 *.test

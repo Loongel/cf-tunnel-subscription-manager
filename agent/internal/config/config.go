@@ -52,7 +52,7 @@ func FromEnv() (Config, error) {
 		SwarmNodeName:        os.Getenv("SWARM_NODE_NAME"),
 		StackName:            os.Getenv("STACK_NAME"),
 		ServiceName:          stringEnv("SERVICE_NAME", "cloudflared"),
-		ImageVersion:         stringEnv("IMAGE_VERSION", "cf-tunnel-agent:0.1.0"),
+		ImageVersion:         stringEnv("IMAGE_VERSION", "ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3"),
 		HeartbeatInterval:    durationEnv("HEARTBEAT_INTERVAL", 30*time.Second),
 		CommandPollInterval:  durationEnv("COMMAND_POLL_INTERVAL", 20*time.Second),
 		RestartCooldown:      durationEnv("RESTART_COOLDOWN_SECONDS", 610*time.Second),

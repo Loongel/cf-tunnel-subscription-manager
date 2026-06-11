@@ -30,7 +30,8 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Admin UI interaction test | Playwright on `hd01` verified wrong-token feedback, successful login, dashboard metrics, preferred endpoint creation, proxy node creation, subscription links, and V2Ray preview generation. | Browser verified |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
-| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2`. | Complete |
+| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3`. | Complete |
+| Local deployment secret management | `.secrets/worker.env` and `.secrets/swarm.env` are documented, ignored by Git, excluded from remote build sync, and consumed by deployment scripts. | Complete |
 
 ## Completed Verification
 

@@ -1,6 +1,6 @@
 {
-  "name": "cf-tunnel-worker-control-plane",
-  "version": "0.1.0",
+  "name": "cf-tunnel-subscription-manager-worker",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "scripts": {

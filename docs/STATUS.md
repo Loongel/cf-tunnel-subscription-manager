@@ -34,6 +34,7 @@ Production Worker resource name remains `cf-tunnel-control-plane` to preserve th
   - Worker Wrangler config and D1 migration.
   - Remote build script for `ssh hd01`.
   - Worker deploy helper using runtime environment variables for secrets.
+  - Repository-local `.secrets/worker.env` and `.secrets/swarm.env` workflow for repeatable local deployment without committing secrets.
 
 ## Verified
 
@@ -45,7 +46,7 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Worker `npm test` (`15` tests passed)
 - Agent `go test ./...`
 - Agent Docker image build with `cloudflared 2026.6.0`
-- Production agent image configured as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2`
+- Production agent image configured as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3`
 - Worker `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
 - Worker `npx wrangler deploy --dry-run`
 - Remote D1 database `cf-tunnel-control-plane` created with ID `c018bec2-7abd-42b8-863d-3030727f0026`

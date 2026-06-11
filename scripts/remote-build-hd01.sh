@@ -10,6 +10,7 @@ ssh "${REMOTE}" "mkdir -p '${REMOTE_DIR}'"
 if ! rsync -az --delete \
   --exclude node_modules \
   --exclude .wrangler \
+  --exclude .secrets \
   --exclude .git \
   ./ "${REMOTE}:${REMOTE_DIR}/"; then
   echo "rsync failed; falling back to tar over ssh" >&2
@@ -17,6 +18,7 @@ if ! rsync -az --delete \
   tar \
     --exclude node_modules \
     --exclude .wrangler \
+    --exclude .secrets \
     --exclude .git \
     -czf - . | ssh "${REMOTE}" "cd '${REMOTE_DIR}' && tar -xzf -"
 fi

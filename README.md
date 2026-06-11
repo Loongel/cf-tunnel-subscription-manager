@@ -11,23 +11,45 @@ The project has two deployable parts:
 
 - GitHub repository: `https://github.com/Loongel/cf-tunnel-subscription-manager`
 - Worker deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
-- Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2`
+- Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3`
 - Latest verified Worker version: `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
 - Pinned `cloudflared` version in the agent image: `2026.6.0`
 
 Use a versioned agent image tag in production. `latest` is published for convenience, but production Swarm stacks should pin a release tag.
 
+Verify the image before deploying a stack:
+
+```bash
+docker pull ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
+docker run --rm --entrypoint cloudflared ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3 --version
+```
+
 ## Quick Start
 
 1. Deploy the Worker and D1 database using [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-2. Copy [deploy/.env.template](deploy/.env.template) to a private `.env` file and fill in `WORKER_BASE_URL`, `AGENT_TOKEN`, `DEPLOY_NODE`, and tunnel targets.
-3. Deploy the Swarm stack:
+2. Create local secret files from the templates:
 
    ```bash
-   docker stack deploy --with-registry-auth -c deploy/docker-stack.example.yml edge
+   install -m 700 -d .secrets
+   cp deploy/worker.env.template .secrets/worker.env
+   cp deploy/.env.template .secrets/swarm.env
+   chmod 600 .secrets/*.env
    ```
 
-4. Open the admin UI:
+3. Fill `.secrets/worker.env` for Worker deployment and `.secrets/swarm.env` for Docker Swarm deployment. The `.secrets/` directory is ignored by Git.
+4. Deploy the Worker:
+
+   ```bash
+   ./scripts/deploy-worker.sh
+   ```
+
+5. Deploy the Swarm stack:
+
+   ```bash
+   ./scripts/deploy-swarm.sh
+   ```
+
+6. Open the admin UI:
 
    ```text
    https://cf-tunnel-control-plane.officesline.workers.dev/admin
@@ -46,4 +68,4 @@ Use a versioned agent image tag in production. `latest` is published for conveni
 
 Do not commit Cloudflare API tokens, tunnel tokens, admin tokens, agent tokens, or subscription tokens.
 
-Use `wrangler secret put` for Worker secrets and runtime environment variables or Docker secrets for Swarm values.
+Use `.secrets/worker.env` and `.secrets/swarm.env` for local deployment state. Use `wrangler secret put` for Worker runtime secrets and runtime environment variables or Docker secrets for Swarm values.

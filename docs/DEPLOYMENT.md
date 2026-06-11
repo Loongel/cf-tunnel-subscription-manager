@@ -4,6 +4,38 @@ This guide is written for a fresh operator deploying the project without reading
 
 Existing deployments should keep the old Worker and data until the new Worker, D1 data, and agent image are verified.
 
+## Local Secret Files
+
+Deployment secrets are intentionally not committed to Git, but operators should keep them in a stable local location so deployments are repeatable.
+
+Use this repository-local layout:
+
+```text
+.secrets/
+  worker.env
+  swarm.env
+```
+
+Create the files from committed templates:
+
+```bash
+install -m 700 -d .secrets
+cp deploy/worker.env.template .secrets/worker.env
+cp deploy/.env.template .secrets/swarm.env
+chmod 600 .secrets/*.env
+```
+
+The `.secrets/` directory is excluded by `.gitignore` and by the remote build script. Do not put `.secrets/` into Docker images or release artifacts.
+
+File purposes:
+
+| File | Used by | Contains |
+| --- | --- | --- |
+| `.secrets/worker.env` | `scripts/deploy-worker.sh`, `scripts/worker-smoke.sh` | Cloudflare API token, account ID, Worker URL, `ADMIN_TOKEN`, `AGENT_TOKEN`, and `SUBSCRIPTION_TOKEN`. |
+| `.secrets/swarm.env` | `scripts/deploy-swarm.sh` | Swarm stack variables, agent image tag, tunnel token, quick tunnel targets, Worker URL, and `AGENT_TOKEN`. |
+
+`hd01` currently also keeps generated runtime secrets at `/root/.cf-tunnel-control-plane.secrets` for the deployed Worker validation environment. Treat that file as host-local operational state, not as source code.
+
 ## Release Artifacts
 
 | Artifact | Value |
@@ -12,7 +44,7 @@ Existing deployments should keep the old Worker and data until the new Worker, D
 | Worker script name | `cf-tunnel-control-plane` |
 | Worker URL currently used by this deployment | `https://cf-tunnel-control-plane.officesline.workers.dev` |
 | D1 database name currently used by this deployment | `cf-tunnel-control-plane` |
-| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2` |
+| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` |
 | Agent image fallback for local testing | `cf-tunnel-agent:test` |
 | Pinned cloudflared version | `2026.6.0` |
 
@@ -69,15 +101,16 @@ npx wrangler d1 migrations apply cf-tunnel-control-plane --remote
 npx wrangler deploy
 ```
 
-The helper script runs dependency install, typecheck, tests, remote D1 migrations, Worker secret upload, and deploy:
+The helper script reads `.secrets/worker.env` by default, then runs dependency install, typecheck, tests, remote D1 migrations, Worker secret upload, and deploy:
 
 ```bash
-CLOUDFLARE_API_TOKEN=... \
-CLOUDFLARE_ACCOUNT_ID=... \
-ADMIN_TOKEN=... \
-AGENT_TOKEN=... \
-SUBSCRIPTION_TOKEN=... \
 ./scripts/deploy-worker.sh
+```
+
+To use a different local secret file:
+
+```bash
+LOCAL_SECRET_FILE=/secure/path/worker.env ./scripts/deploy-worker.sh
 ```
 
 `CLOUDFLARE_API_TOKEN` must be able to manage D1, deploy Workers, and edit Worker secrets. A token that can only identify the account is not enough.
@@ -87,10 +120,17 @@ SUBSCRIPTION_TOKEN=... \
 The default production image is:
 
 ```text
-ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2
+ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
 ```
 
 The image is built from [agent/Dockerfile](../agent/Dockerfile), includes the Go tunnel agent and pinned `cloudflared 2026.6.0`, and does not download `cloudflared` at runtime.
+
+Verify the published image before using it in a production stack:
+
+```bash
+docker pull ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
+docker run --rm --entrypoint cloudflared ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3 --version
+```
 
 For local testing on a single node:
 
@@ -103,20 +143,20 @@ For production Swarm, use the published GHCR image or publish your own registry 
 
 ## Docker Swarm Deployment
 
-Copy [deploy/.env.template](../deploy/.env.template) to a private env file and fill in the values:
+Copy [deploy/.env.template](../deploy/.env.template) to the local Swarm secret file and fill in the values:
 
 ```bash
-cp deploy/.env.template .env.production
+cp deploy/.env.template .secrets/swarm.env
+chmod 600 .secrets/swarm.env
 ```
 
 Deploy:
 
 ```bash
-set -a
-. ./.env.production
-set +a
-docker stack deploy --with-registry-auth -c deploy/docker-stack.example.yml "${STACK_NAME}"
+./scripts/deploy-swarm.sh
 ```
+
+To use a different file, set `SWARM_ENV_FILE=/secure/path/swarm.env`.
 
 The stack template expects the external Docker networks `aa_host_bridge` and `cf-net` to already exist. Create or rename networks to match your environment before deploying.
 
@@ -124,12 +164,14 @@ The agent health endpoint is `http://127.0.0.1:1984/health` inside the container
 
 ## Stack Configuration Reference
 
+These variables are intended to be set by the operator in the private env file used with `docker stack deploy`.
+
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `DOMAIN` | no | `example.com` in template | Operator-owned domain marker. The current stack template does not use it directly, but it is kept for environment consistency with existing stacks. |
 | `DEPLOY_NODE` | yes | none | Docker Swarm node hostname where the agent service must run. Used by the placement constraint and as `SWARM_NODE_NAME`. |
 | `STACK_NAME` | yes | `edge` in examples | Swarm stack name and agent metadata value. |
-| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2` | Agent container image. Pin a version tag for production. |
+| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` | Agent container image. Pin a version tag for production. |
 | `TUNNEL_TOKEN` | no | empty | Cloudflare fixed tunnel token. Leave empty to run only quick tunnels. |
 | `QUICK_TUNNELS` | no if `TUNNEL_TOKEN` is set | empty | Space- or comma-separated quick tunnel targets, for example `http://s1:2095 http://s2:2096`. Each target starts an independent TryCloudflare tunnel. |
 | `EDGE_IP_VERSION` | no | `auto` in template | Passed to `cloudflared --edge-ip-version`. Use `auto` for Swarm overlay networks unless container IPv6 is verified. Valid values are `auto`, `4`, and `6`. |
@@ -141,6 +183,25 @@ The agent health endpoint is `http://127.0.0.1:1984/health` inside the container
 | `COMMAND_POLL_INTERVAL` | no | `20s` | How often the agent polls the Worker for restart/status commands. Accepts Go duration strings or seconds. |
 | `RESTART_COOLDOWN_SECONDS` | no | `610` | Minimum cooldown before a quick tunnel restarts after failure, used to avoid TryCloudflare rate limiting. Accepts Go duration strings or seconds. |
 | `QUICK_START_SPACING` | no | `20s` | Delay between starting quick tunnel processes. Reduces startup bursts and rate-limit risk. |
+
+The stack template also injects these container variables. Most operators should leave them as the template defines them.
+
+| Variable | Source | Default in template | Meaning |
+| --- | --- | --- | --- |
+| `LOG_FILE` | fixed template value | `/temp-tunnel/history.log` | Local append-only quick tunnel history file in the mounted volume. |
+| `MAP_FILE` | fixed template value | `/temp-tunnel/tunnels.list` | Local compatibility file containing `target public-url` mappings for active quick tunnels. |
+| `SWARM_NODE_NAME` | derived from `DEPLOY_NODE` | `${DEPLOY_NODE}` | Node identity reported to the Worker and used when deriving the agent ID. |
+| `STACK_NAME` | operator variable | `${STACK_NAME}` | Stack identity reported to the Worker. |
+| `SERVICE_NAME` | fixed template value | `cloudflared` | Service identity reported to the Worker. Change only if you rename the service and want matching metadata. |
+| `IMAGE_VERSION` | derived from `AGENT_IMAGE` | `${AGENT_IMAGE}` | Image metadata reported to the Worker for audit and troubleshooting. |
+
+Advanced agent variables are supported by the binary but are not normally needed in the Swarm template.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENT_ID` | derived from swarm node, stack, service, and hostname | Stable ID used by the Worker. Set only when you need to preserve identity across hostname or stack-name changes. |
+| `CLOUDFLARED_PATH` | `/usr/local/bin/cloudflared` | Path to the bundled `cloudflared` binary. Override only for custom images. |
+| `HEALTH_ADDR` | `127.0.0.1:1984` | Agent health HTTP listener used by the container healthcheck. |
 
 ## Worker Runtime Configuration
 
