@@ -1,5 +1,9 @@
 # Repository Instructions
 
+Project display name: Cloudflare Tunnel Subscription Manager.
+
+Target GitHub repository slug: `cf-tunnel-subscription-manager`.
+
 ## Project Shape
 
 - `worker/` is a Cloudflare Workers TypeScript application using D1.

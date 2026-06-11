@@ -1,6 +1,6 @@
-# Completion Audit
+# Cloudflare Tunnel Subscription Manager Completion Audit
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 This file tracks objective-level completion evidence. It is intentionally conservative: source code presence is not treated as final delivery proof until build, test, deployment, and smoke evidence exists.
 
@@ -16,6 +16,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Worker can command agent to restart quick tunnel | `commands` D1 table, admin restart endpoint, cron queue, and agent command polling are implemented. | Build verified |
 | V2Ray, PassWall2, sing-box subscriptions | `/sub/v2ray/:token`, `/sub/passwall2/:token`, `/sub/sing-box/:token` implemented; protocol tests passed. | Unit verified |
 | Preferred IP/domain global and node-specific configuration | D1 tables, Admin API, and UI support global/node endpoint scope and per-node endpoint selection. | Build verified |
+| Preserve node-specific endpoint bindings during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping node-scoped endpoint selections. | Unit verified |
 | Grouped subscription generation | Group CRUD and group-level endpoint mode defaults are implemented. | Build verified |
 | Agent does not download cloudflared at runtime | `agent/Dockerfile` downloads pinned `cloudflared 2026.6.0` at image build time; Docker build passed. | Docker verified |
 | Agent starts fixed and quick tunnels | `agent/internal/manager/manager.go` supervises fixed token tunnel and multiple quick tunnels. | Go test/build verified |
@@ -28,13 +29,14 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Admin UI interaction test | Playwright on `hd01` verified wrong-token feedback, successful login, dashboard metrics, preferred endpoint creation, proxy node creation, subscription links, and V2Ray preview generation. | Browser verified |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
+| Project naming | Display name is `Cloudflare Tunnel Subscription Manager`; target GitHub repository slug is `cf-tunnel-subscription-manager`. | Complete |
 
 ## Completed Verification
 
 - `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`4` tests passed)
+- Worker `npm test` (`15` tests passed)
 - Agent `go test ./...`
 - Agent Docker build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local`
@@ -49,6 +51,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Public HTTP `200` through TryCloudflare quick tunnel before and after restart
 - D1 cleanup of runtime test rows
 - Playwright browser test for admin UI login/config/preview flow
+- Chromium admin UI smoke for 2026-06-11 layout/notice cleanup
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns

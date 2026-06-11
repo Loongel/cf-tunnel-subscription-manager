@@ -1,6 +1,6 @@
-# Subscription Adapter Notes
+# Cloudflare Tunnel Subscription Manager Subscription Adapter Notes
 
-The project does not attempt to become a full subscription converter. The Worker owns tunnel-aware node derivation and delegates or isolates format conversion behind an adapter boundary.
+Cloudflare Tunnel Subscription Manager does not attempt to become a full subscription converter. The Worker owns tunnel-aware node derivation and delegates or isolates format conversion behind an adapter boundary.
 
 ## Built-in Adapter Scope
 
@@ -32,4 +32,3 @@ Unsupported or malformed nodes are skipped with a reason in subscription preview
 ## Future Extension Point
 
 `SUBCONVERTER_URL` is reserved for a later external conversion backend. The first release keeps conversion local so Worker deployment stays self-contained.
-

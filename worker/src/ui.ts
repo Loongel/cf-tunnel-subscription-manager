@@ -7,7 +7,7 @@ export function renderAdminUi(env: Env): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CF Tunnel Control</title>
+  <title>Cloudflare Tunnel Subscription Manager</title>
   <style>
     :root {
       color-scheme: dark;
@@ -228,7 +228,7 @@ export function renderAdminUi(env: Env): string {
 </head>
 <body>
   <header>
-    <div class="brand"><div class="brandmark">CF</div><h1>CF Tunnel Control</h1></div>
+    <div class="brand"><div class="brandmark">CF</div><h1>Cloudflare Tunnel Subscription Manager</h1></div>
     <div class="tokenbar">
       <input id="tokenInput" type="password" autocomplete="off" placeholder="Admin token">
       <button id="saveToken" class="primary">Login</button>

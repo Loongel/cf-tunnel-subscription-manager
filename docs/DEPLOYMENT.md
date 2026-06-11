@@ -1,6 +1,8 @@
-# Deployment Guide
+# Cloudflare Tunnel Subscription Manager Deployment Guide
 
 This guide intentionally uses placeholders. Do not commit real Cloudflare tokens.
+
+The project repository is `cf-tunnel-subscription-manager`. The deployed Worker and D1 resource names currently remain `cf-tunnel-control-plane` to preserve the existing production URL and database binding.
 
 ## Worker
 
@@ -51,7 +53,7 @@ This guide intentionally uses placeholders. Do not commit real Cloudflare tokens
 Build on `ssh hd01`:
 
 ```bash
-cd /path/to/CF-temp-tunnels-auto-update-to-subs/agent
+cd /path/to/cf-tunnel-subscription-manager/agent
 docker build \
   --build-arg CLOUDFLARED_VERSION=2026.6.0 \
   -t cf-tunnel-agent:test .

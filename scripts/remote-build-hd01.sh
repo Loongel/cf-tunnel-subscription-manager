@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REMOTE="${REMOTE:-hd01}"
-REMOTE_DIR="${REMOTE_DIR:-/root/builds/CF-temp-tunnels-auto-update-to-subs}"
+REMOTE_DIR="${REMOTE_DIR:-/root/builds/cf-tunnel-subscription-manager}"
 IMAGE_TAG="${IMAGE_TAG:-cf-tunnel-agent:test}"
 
 ssh "${REMOTE}" "mkdir -p '${REMOTE_DIR}'"

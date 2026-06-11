@@ -1,6 +1,10 @@
-# Project Status
+# Cloudflare Tunnel Subscription Manager Status
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
+
+Repository slug: `cf-tunnel-subscription-manager`.
+
+Production Worker resource name remains `cf-tunnel-control-plane` to preserve the existing deployment URL and D1 binding.
 
 ## Completed Source Work
 
@@ -14,6 +18,8 @@ Last updated: 2026-06-10
   - D1-backed subscription token rotation.
   - Group-level endpoint mode defaults for subscription generation.
   - Worker-served admin UI.
+  - Subscription import-source management, fallback/TLS-carrier composition, and refresh semantics that replace stale imported nodes only after successful non-empty fetches.
+  - Node-scoped endpoint selections are preserved across import-source refreshes.
 - Go tunnel agent:
   - Environment parsing and target normalization.
   - Fixed tunnel supervision.
@@ -35,7 +41,7 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - `./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`4` tests passed)
+- Worker `npm test` (`15` tests passed)
 - Agent `go test ./...`
 - Agent Docker image build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
@@ -50,6 +56,9 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Swarm restart command test passed: Worker queued `restart_tunnel`, Agent acked it, wrote a new quick tunnel URL, and the new URL returned HTTP `200` using Cloudflare DNS resolution
 - Temporary runtime test containers, Swarm stacks, volumes, and D1 rows were removed after verification
 - Admin UI browser test passed with Playwright on `hd01`: wrong token feedback, correct login, endpoint creation, proxy node creation, and subscription preview generation
+- Admin UI Chromium smoke passed on 2026-06-11 after layout cleanup: authenticated page no longer shows stale public-status notice, Proxy Nodes endpoint counts reflect loaded global endpoints, and Saved Groups chips render compactly.
+- Endpoint-binding regression test passed: refreshing imported nodes preserves node-scoped endpoint selections for future refreshes.
+- Worker deployed version `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`
 
 Additional checks:

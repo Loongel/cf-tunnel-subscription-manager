@@ -1,6 +1,6 @@
-# User Validation Guide
+# Cloudflare Tunnel Subscription Manager User Validation Guide
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 ## Admin UI
 
@@ -89,7 +89,7 @@ Remove demo UI config rows if desired:
 
 ```bash
 ssh hd01 '
-cd /root/builds/CF-temp-tunnels-auto-update-to-subs/worker
+cd /root/builds/cf-tunnel-subscription-manager/worker
 export CLOUDFLARE_ACCOUNT_ID=9e0d7a7708a7cdbf66f1298514aefebb
 export CLOUDFLARE_API_TOKEN=<token with D1 access>
 npx wrangler d1 execute cf-tunnel-control-plane --remote --command "

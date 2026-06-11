@@ -1,4 +1,4 @@
-# CF Temporary Tunnel Registry and Subscription Manager
+# Cloudflare Tunnel Subscription Manager Requirements
 
 本文档是第一版的产品需求和技术设计基线，目标是把原始想法整理成可以实现、测试和交付的规格。
 
@@ -573,7 +573,7 @@ UI 目标是“运维控制台”，不是营销页。信息应紧凑、可扫�
 
 ```text
 +----------------------------------------------------------------+
-| CF Tunnel Control                           Last sync 12:05:02 |
+| Cloudflare Tunnel Subscription Manager      Last sync 12:05:02 |
 +----------------------------------------------------------------+
 | Agents Online  3 | Healthy Tunnels  8 | Unhealthy 1 | Commands |
 +----------------------------------------------------------------+

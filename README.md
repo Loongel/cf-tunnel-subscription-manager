@@ -1,10 +1,12 @@
-# CF Temporary Tunnel Registry and Subscription Manager
+# Cloudflare Tunnel Subscription Manager
 
-Control plane and tunnel agent for Docker Swarm services exposed through fixed Cloudflare Tunnel and TryCloudflare quick tunnels.
+Cloudflare Tunnel Subscription Manager keeps Docker Swarm services reachable through fixed Cloudflare Tunnel and TryCloudflare quick tunnels, then turns those tunnel-aware proxy nodes into V2Ray, PassWall2, and sing-box subscriptions.
+
+GitHub repository slug: `cf-tunnel-subscription-manager`.
 
 ## Components
 
-- `worker/`: Cloudflare Worker control plane with D1 persistence, admin UI, cron health checks, command queue, and subscription outputs.
+- `worker/`: Cloudflare Worker control plane with D1 persistence, admin UI, cron health checks, restart command queue, import-source management, and subscription outputs.
 - `agent/`: Go tunnel agent that starts `cloudflared`, records quick tunnel URLs, reports status, and polls restart commands.
 - `deploy/`: Docker Swarm compose and environment templates.
 - `docs/`: requirements and deployment documentation.
@@ -15,7 +17,9 @@ Do not commit real Cloudflare tokens. Use Wrangler secrets and runtime environme
 
 ## Current Status
 
-Source implementation is complete for the first release, build-tested on `ssh hd01`, and deployed to Cloudflare Workers at `https://cf-tunnel-control-plane.officesline.workers.dev`.
+First release is complete, build-tested on `ssh hd01`, and deployed to Cloudflare Workers at `https://cf-tunnel-control-plane.officesline.workers.dev`.
+
+Latest verified deployment: Worker version `020883a3-fb90-4e2d-89ec-b1e99f5510b3` on 2026-06-11.
 
 See:
 
