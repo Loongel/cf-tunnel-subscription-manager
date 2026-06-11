@@ -48,6 +48,18 @@ The project repository is `cf-tunnel-subscription-manager`. The deployed Worker 
 
    The token must include D1 database access, Workers script deploy access, and Worker secret edit access. A token that can only identify the account is not enough.
 
+## Cutover Order
+
+When replacing an existing deployment, keep the old Worker and its data in place until the new deployment is verified and the critical data has been migrated.
+
+Recommended order:
+
+1. Deploy the new Worker with the same public URL or a separate staging URL.
+2. Verify login, public metrics, proxy-node editing, import refresh, and subscription preview.
+3. Migrate any production data that must be preserved from the old deployment.
+4. Switch the traffic or DNS target only after the new deployment is stable.
+5. Retire the old Worker and any temporary validation data after the cutover is complete.
+
 ## Agent Image
 
 Build on `ssh hd01`:
