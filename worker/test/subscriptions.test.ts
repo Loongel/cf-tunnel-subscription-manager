@@ -117,8 +117,13 @@ describe("subscription generation", () => {
       endpointMode: "selected"
     });
 
-    expect(generated).toHaveLength(1);
-    expect(generated[0]).toMatchObject({
+    expect(generated).toHaveLength(2);
+    expect(generated.map((item) => item.id)).toEqual([
+      "node_1:direct:endpoint_1",
+      "node_1:sni:sni_1:endpoint_1"
+    ]);
+    const sniNode = generated[1];
+    expect(sniNode).toMatchObject({
       id: "node_1:sni:sni_1:endpoint_1",
       sourceNodeId: "node_1",
       sniId: "sni_1",
@@ -126,11 +131,12 @@ describe("subscription generation", () => {
       endpointValue: "104.16.0.1",
       tunnelHost: "edge.example.com"
     });
-    const parsed = new URL(generated[0].uri || "");
+    const parsed = new URL(sniNode.uri || "");
     expect(parsed.hostname).toBe("104.16.0.1");
     expect(parsed.port).toBe("443");
     expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
     expect(parsed.searchParams.get("host")).toBe("edge.example.com");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | cf-ip | edge remark");
   });
 
   it("does not expand stale group member ids to all current derived nodes", async () => {
@@ -178,17 +184,23 @@ describe("subscription generation", () => {
       endpointMode: "selected"
     });
 
-    expect(generated).toHaveLength(1);
+    expect(generated).toHaveLength(2);
     expect(generated[0]).toMatchObject({
+      id: "node_1:direct:endpoint_1",
+      tunnelHost: undefined,
+      trafficLabel: undefined
+    });
+    expect(generated[1]).toMatchObject({
       id: "node_1:swarm:hd01|target:http://s1:80:endpoint_1",
       tunnelId: trafficKey,
       trafficLabel: "hd01 -> http://s1:80",
       tunnelHost: "fresh.trycloudflare.com"
     });
-    const parsed = new URL(generated[0].uri || "");
+    const parsed = new URL(generated[1].uri || "");
     expect(parsed.hostname).toBe("104.16.0.1");
     expect(parsed.searchParams.get("sni")).toBe("fresh.trycloudflare.com");
     expect(parsed.searchParams.get("host")).toBe("fresh.trycloudflare.com");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | cf-ip | hd01 -> http://s1:80");
   });
 });
 

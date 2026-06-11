@@ -1277,11 +1277,6 @@ function resolveGroupDerivedIds(
   };
 }
 
-function sourceNodeIdFromGeneratedId(id: string): string | null {
-  const match = /^(node_[^:]+):/.exec(id);
-  return match ? match[1] : null;
-}
-
 async function createGroup(env: Env, body: JsonRecord): Promise<unknown> {
   const id = optionalString(body.id) || makeId("grp");
   const timestamp = nowIso();

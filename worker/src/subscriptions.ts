@@ -214,18 +214,15 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     }
 
     for (const traffic of selectedTraffic) {
+      const tunnelId = traffic.id === "direct" ? null : traffic.id;
       const tunnelHost = traffic.hostname;
       const trafficLabel = traffic.label || null;
-      if (!tunnelHost) {
-        output.push(generateOne(node, traffic.id, traffic.sniId || null, null, trafficLabel, null, effectiveOptions));
-        continue;
-      }
       if (selected.length === 0) {
-        output.push(generateOne(node, traffic.id, traffic.sniId || null, tunnelHost, trafficLabel, null, effectiveOptions));
+        output.push(generateOne(node, tunnelId, traffic.sniId || null, tunnelHost, trafficLabel, null, effectiveOptions));
         continue;
       }
       for (const endpoint of selected) {
-        output.push(generateOne(node, traffic.id, traffic.sniId || null, tunnelHost, trafficLabel, endpoint, effectiveOptions));
+        output.push(generateOne(node, tunnelId, traffic.sniId || null, tunnelHost, trafficLabel, endpoint, effectiveOptions));
       }
     }
   }
@@ -237,7 +234,9 @@ function selectedTrafficForNode(
   tunnelsByNode: Map<string, TunnelSelectionRow[]>,
   snisByNode: Map<string, SniSelectionRow[]>
 ): Array<{ id: string; sniId?: string; hostname: string | null; label?: string }> {
-  const output: Array<{ id: string; sniId?: string; hostname: string | null; label?: string }> = [];
+  const output: Array<{ id: string; sniId?: string; hostname: string | null; label?: string }> = [
+    { id: "direct", hostname: null }
+  ];
   if (node.use_tunnel) {
     for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
       output.push({ id: tunnel.traffic_key, hostname: tunnel.public_hostname, label: tunnel.traffic_label });
@@ -340,7 +339,7 @@ function generateOne(
   endpoint: PreferredEndpointRow | null,
   options: SubscriptionOptions
 ): GeneratedNode {
-  const ctx = { node, tunnelHost, endpoint, format: options.format };
+  const ctx = { node, tunnelHost, trafficLabel, endpoint, format: options.format };
   const trafficId = sniId ? `sni:${sniId}` : tunnelId || "direct";
   const id = `${node.id}:${trafficId}:${endpoint?.id || "direct"}`;
   const metadata = {

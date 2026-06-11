@@ -3,6 +3,7 @@ import type { GeneratedNode, JsonRecord, PreferredEndpointRow, ProxyNodeRow } fr
 export interface MutationContext {
   node: ProxyNodeRow;
   tunnelHost?: string | null;
+  trafficLabel?: string | null;
   endpoint?: PreferredEndpointRow | null;
   format: "v2ray" | "passwall2" | "sing-box";
 }
@@ -43,9 +44,11 @@ export function decodeBase64(input: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-function displayName(node: ProxyNodeRow, endpoint?: PreferredEndpointRow | null): string {
-  const suffix = endpoint ? endpoint.label || endpoint.value : "tunnel";
-  return endpoint ? `${node.name} | ${suffix}` : node.name;
+function displayName(ctx: MutationContext): string {
+  const parts = [ctx.node.name];
+  if (ctx.endpoint) parts.push(ctx.endpoint.label || ctx.endpoint.value);
+  if (ctx.trafficLabel) parts.push(ctx.trafficLabel);
+  return parts.join(" | ");
 }
 
 function targetServer(ctx: MutationContext): string | null {
@@ -119,7 +122,7 @@ function mutateUrlUri(raw: string, ctx: MutationContext): string {
     url.hostname = server;
     url.port = targetPort(url.port, ctx);
   }
-  url.hash = `#${encodeURIComponent(displayName(ctx.node, ctx.endpoint))}`;
+  url.hash = `#${encodeURIComponent(displayName(ctx))}`;
   if (host) {
     writeUrlTlsHost(url, host, Boolean(ctx.tunnelHost || ctx.endpoint));
   }
@@ -135,7 +138,7 @@ function mutateVmess(raw: string, ctx: MutationContext): string {
     parsed.add = server;
     parsed.port = targetPort(typeof parsed.port === "string" || typeof parsed.port === "number" ? String(parsed.port) : null, ctx);
   }
-  parsed.ps = displayName(ctx.node, ctx.endpoint);
+  parsed.ps = displayName(ctx);
   if (host) {
     parsed.sni = host;
     parsed.host = host;
@@ -148,7 +151,7 @@ function parseShadowsocks(raw: string, ctx: MutationContext): string {
   const body = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const queryIndex = body.indexOf("?");
   const query = queryIndex >= 0 ? body.slice(queryIndex) : "";
-  const label = `#${encodeURIComponent(displayName(ctx.node, ctx.endpoint))}`;
+  const label = `#${encodeURIComponent(displayName(ctx))}`;
   if (!body.includes("@")) {
     const details = parseShadowsocksDetails(raw);
     const server = targetServer(ctx);
@@ -264,7 +267,7 @@ function mutateOutboundObject(raw: JsonRecord, ctx: MutationContext): JsonRecord
       ctx
     ));
   }
-  output.tag = displayName(ctx.node, ctx.endpoint);
+  output.tag = displayName(ctx);
   if (host) {
     const tls = typeof output.tls === "object" && output.tls !== null && !Array.isArray(output.tls)
       ? (output.tls as JsonRecord)
@@ -315,7 +318,7 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
 
   const server = targetServer(ctx);
   if (!server) return { ...base, skipped: true, reason: "missing server" };
-  const tag = displayName(ctx.node, ctx.endpoint);
+  const tag = displayName(ctx);
   try {
     if (protocol === "vless" || protocol === "trojan") {
       const url = new URL(raw);

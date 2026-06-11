@@ -1052,6 +1052,8 @@ export function renderAdminUi(env: Env): string {
       if (item.tunnelHost || item.sniId) {
         const label = item.trafficLabel || item.tunnelHost || item.sniId;
         parts.push({ label: label, value: label });
+      } else {
+        parts.push({ label: 'Direct', value: 'Direct' });
       }
       if (item.endpointId || item.endpointValue) {
         const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
@@ -1084,10 +1086,8 @@ export function renderAdminUi(env: Env): string {
           group = { id: item.sourceNodeId || item.sourceName, name: item.sourceName, title: item.sourceName, tags: [] };
           grouped.push(group);
         }
-        const tags = derivedParts(item);
-        for (const tag of (tags.length > 0 ? tags : [{ label: 'Direct', value: 'Direct' }])) {
-          if (!group.tags.some((existing) => existing.label === tag.label && existing.value === tag.value)) group.tags.push(tag);
-        }
+        const tag = { label: derivedFullLabel(item), value: generatedLabel(item.id) };
+        if (!group.tags.some((existing) => existing.label === tag.label && existing.value === tag.value)) group.tags.push(tag);
       }
       return '<div class="group-chip-row">' + grouped.map((group) => {
         const tagHtml = group.tags.map((part) =>
