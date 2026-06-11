@@ -12,7 +12,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: loongel/cf-tunnel-subscription-manager-agent
+  IMAGE_NAME: loongel/cf-tunnel-subscription-manager
   CLOUDFLARED_VERSION: 2026.6.0
 
 jobs:

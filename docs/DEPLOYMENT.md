@@ -12,7 +12,7 @@ Existing deployments should keep the old Worker and data until the new Worker, D
 | Worker script name | `cf-tunnel-control-plane` |
 | Worker URL currently used by this deployment | `https://cf-tunnel-control-plane.officesline.workers.dev` |
 | D1 database name currently used by this deployment | `cf-tunnel-control-plane` |
-| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1` |
+| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2` |
 | Agent image fallback for local testing | `cf-tunnel-agent:test` |
 | Pinned cloudflared version | `2026.6.0` |
 
@@ -87,7 +87,7 @@ SUBSCRIPTION_TOKEN=... \
 The default production image is:
 
 ```text
-ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1
+ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2
 ```
 
 The image is built from [agent/Dockerfile](../agent/Dockerfile), includes the Go tunnel agent and pinned `cloudflared 2026.6.0`, and does not download `cloudflared` at runtime.
@@ -129,7 +129,7 @@ The agent health endpoint is `http://127.0.0.1:1984/health` inside the container
 | `DOMAIN` | no | `example.com` in template | Operator-owned domain marker. The current stack template does not use it directly, but it is kept for environment consistency with existing stacks. |
 | `DEPLOY_NODE` | yes | none | Docker Swarm node hostname where the agent service must run. Used by the placement constraint and as `SWARM_NODE_NAME`. |
 | `STACK_NAME` | yes | `edge` in examples | Swarm stack name and agent metadata value. |
-| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1` | Agent container image. Pin a version tag for production. |
+| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2` | Agent container image. Pin a version tag for production. |
 | `TUNNEL_TOKEN` | no | empty | Cloudflare fixed tunnel token. Leave empty to run only quick tunnels. |
 | `QUICK_TUNNELS` | no if `TUNNEL_TOKEN` is set | empty | Space- or comma-separated quick tunnel targets, for example `http://s1:2095 http://s2:2096`. Each target starts an independent TryCloudflare tunnel. |
 | `EDGE_IP_VERSION` | no | `auto` in template | Passed to `cloudflared --edge-ip-version`. Use `auto` for Swarm overlay networks unless container IPv6 is verified. Valid values are `auto`, `4`, and `6`. |

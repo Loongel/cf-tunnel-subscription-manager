@@ -11,7 +11,7 @@ The project has two deployable parts:
 
 - GitHub repository: `https://github.com/Loongel/cf-tunnel-subscription-manager`
 - Worker deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
-- Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1`
+- Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2`
 - Latest verified Worker version: `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
 - Pinned `cloudflared` version in the agent image: `2026.6.0`
 

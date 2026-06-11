@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   cloudflared:
-    image: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1}
+    image: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2}
     hostname: cloudflared
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:1984/health >/dev/null || exit 1"]
@@ -39,7 +39,7 @@ services:
       SWARM_NODE_NAME: ${DEPLOY_NODE}
       STACK_NAME: ${STACK_NAME}
       SERVICE_NAME: cloudflared
-      IMAGE_VERSION: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1}
+      IMAGE_VERSION: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2}
 
 networks:
   aa_host_bridge:

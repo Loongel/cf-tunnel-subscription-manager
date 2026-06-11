@@ -19,7 +19,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Preserve node-specific endpoint bindings during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping node-scoped endpoint selections. | Unit verified |
 | Grouped subscription generation | Group CRUD and group-level endpoint mode defaults are implemented. | Build verified |
 | Agent does not download cloudflared at runtime | `agent/Dockerfile` downloads pinned `cloudflared 2026.6.0` at image build time; Docker build passed. | Docker verified |
-| Agent image release | `.github/workflows/release-agent-image.yml` publishes `ghcr.io/loongel/cf-tunnel-subscription-manager-agent` for version tags. | Release configured |
+| Agent image release | `.github/workflows/release-agent-image.yml` publishes `ghcr.io/loongel/cf-tunnel-subscription-manager` for version tags. | Release configured |
 | Agent starts fixed and quick tunnels | `agent/internal/manager/manager.go` supervises fixed token tunnel and multiple quick tunnels. | Go test/build verified |
 | Agent records quick tunnel URLs locally | Agent wrote `http://target:80 https://...trycloudflare.com` to `/temp-tunnel/tunnels.list` during real container and Swarm tests. | Runtime verified |
 | Agent reports status and handles restart commands | Worker queued `restart_tunnel`; Agent claimed and acked it; Worker pending count returned to `0`; Agent wrote a new quick tunnel URL. | Runtime verified |
@@ -30,7 +30,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Admin UI interaction test | Playwright on `hd01` verified wrong-token feedback, successful login, dashboard metrics, preferred endpoint creation, proxy node creation, subscription links, and V2Ray preview generation. | Browser verified |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
-| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1`. | Complete |
+| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.2`. | Complete |
 
 ## Completed Verification
 
