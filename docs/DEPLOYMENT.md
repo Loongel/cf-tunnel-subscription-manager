@@ -44,8 +44,7 @@ File purposes:
 | Worker script name | `cf-tunnel-control-plane` |
 | Worker URL currently used by this deployment | `https://cf-tunnel-control-plane.officesline.workers.dev` |
 | D1 database name currently used by this deployment | `cf-tunnel-control-plane` |
-| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` |
-| Agent image digest | `sha256:0506a8879eb66de6905b1a610f91d2f59a481e4d6ecf7ae3cc209f98de9ab604` |
+| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` |
 | Agent image fallback for local testing | `cf-tunnel-agent:test` |
 | Pinned cloudflared version | `2026.6.0` |
 
@@ -121,7 +120,7 @@ LOCAL_SECRET_FILE=/secure/path/worker.env ./scripts/deploy-worker.sh
 The default production image is:
 
 ```text
-ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
+ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4
 ```
 
 The image is built from [agent/Dockerfile](../agent/Dockerfile), includes the Go tunnel agent and pinned `cloudflared 2026.6.0`, and does not download `cloudflared` at runtime.
@@ -129,8 +128,8 @@ The image is built from [agent/Dockerfile](../agent/Dockerfile), includes the Go
 Verify the published image before using it in a production stack:
 
 ```bash
-docker pull ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
-docker run --rm --entrypoint cloudflared ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3 --version
+docker pull ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4
+docker run --rm --entrypoint cloudflared ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4 --version
 ```
 
 For local testing on a single node:
@@ -172,7 +171,7 @@ These variables are intended to be set by the operator in the private env file u
 | `DOMAIN` | no | `example.com` in template | Operator-owned domain marker. The current stack template does not use it directly, but it is kept for environment consistency with existing stacks. |
 | `DEPLOY_NODE` | yes | none | Docker Swarm node hostname where the agent service must run. Used by the placement constraint and as `SWARM_NODE_NAME`. |
 | `STACK_NAME` | yes | `edge` in examples | Swarm stack name and agent metadata value. |
-| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` | Agent container image. Pin a version tag for production. |
+| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` | Agent container image. Pin a version tag for production. |
 | `TUNNEL_TOKEN` | no | empty | Cloudflare fixed tunnel token. Leave empty to run only quick tunnels. |
 | `QUICK_TUNNELS` | no if `TUNNEL_TOKEN` is set | empty | Space- or comma-separated quick tunnel targets, for example `http://s1:2095 http://s2:2096`. Each target starts an independent TryCloudflare tunnel. |
 | `EDGE_IP_VERSION` | no | `auto` in template | Passed to `cloudflared --edge-ip-version`. Use `auto` for Swarm overlay networks unless container IPv6 is verified. Valid values are `auto`, `4`, and `6`. |
@@ -180,8 +179,8 @@ These variables are intended to be set by the operator in the private env file u
 | `AGENT_TOKEN` | yes | none | Must match the Worker `AGENT_TOKEN` secret. |
 | `FIXED_METRICS_PORT_BASE` | no | `2000` | Metrics port for the fixed tunnel process. |
 | `QUICK_METRICS_PORT_BASE` | no | `2100` | Base metrics port for quick tunnels. The first quick tunnel uses base plus one. |
-| `HEARTBEAT_INTERVAL` | no | `30s` | How often the agent posts status to the Worker. Accepts Go duration strings or seconds. |
-| `COMMAND_POLL_INTERVAL` | no | `20s` | How often the agent polls the Worker for restart/status commands. Accepts Go duration strings or seconds. |
+| `HEARTBEAT_INTERVAL` | no | `120s` | How often the agent posts status to the Worker. Accepts Go duration strings or seconds. Lower values make status fresher but increase Worker request count. |
+| `COMMAND_POLL_INTERVAL` | no | `120s` | Normal interval for agent command polling. The agent temporarily polls every 5 seconds after it receives commands, then returns to this interval. |
 | `RESTART_COOLDOWN_SECONDS` | no | `610` | Minimum cooldown before a quick tunnel restarts after failure, used to avoid TryCloudflare rate limiting. Accepts Go duration strings or seconds. |
 | `QUICK_START_SPACING` | no | `20s` | Delay between starting quick tunnel processes. Reduces startup bursts and rate-limit risk. |
 

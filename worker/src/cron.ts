@@ -1,11 +1,13 @@
 import { insertEvent } from "./agent-api";
 import { all, first, run } from "./db";
+import { cleanupStaleTunnels } from "./tunnel-registry";
 import type { Env, TunnelRow } from "./types";
 import { makeId, nowIso, safeJson } from "./utils";
 
 const HEALTHY_STATUS = new Set([200, 204, 301, 302, 401, 403]);
 const RESTART_FAILURE_THRESHOLD = 3;
 const RESTART_COOLDOWN_SECONDS = 610;
+const AGENT_STALE_SECONDS = 360;
 
 interface PendingRow {
   count: number;
@@ -14,6 +16,7 @@ interface PendingRow {
 export async function runScheduled(env: Env): Promise<void> {
   await expireCommands(env);
   await markStaleAgents(env);
+  await cleanupStaleTunnels(env);
   await probeHttpTunnels(env);
 }
 
@@ -33,9 +36,10 @@ async function markStaleAgents(env: Env): Promise<void> {
     `UPDATE agents
      SET status = 'stale', updated_at = ?
      WHERE status = 'online' AND last_seen_at IS NOT NULL
-       AND unixepoch(?) - unixepoch(last_seen_at) > 90`,
+       AND unixepoch(?) - unixepoch(last_seen_at) > ?`,
     nowIso(),
-    nowIso()
+    nowIso(),
+    AGENT_STALE_SECONDS
   );
 }
 

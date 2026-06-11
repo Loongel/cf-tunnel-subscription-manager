@@ -23,6 +23,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Agent starts fixed and quick tunnels | `agent/internal/manager/manager.go` supervises fixed token tunnel and multiple quick tunnels. | Go test/build verified |
 | Agent records quick tunnel URLs locally | Agent wrote `http://target:80 https://...trycloudflare.com` to `/temp-tunnel/tunnels.list` during real container and Swarm tests. | Runtime verified |
 | Agent reports status and handles restart commands | Worker queued `restart_tunnel`; Agent claimed and acked it; Worker pending count returned to `0`; Agent wrote a new quick tunnel URL. | Runtime verified |
+| Worker request volume defaults | Agent heartbeat and command polling default to `120s`; command polling temporarily switches to `5s` only after receiving commands; subscription responses use `max-age=300`. | Build verified |
 | Build/compile only on `ssh hd01` | Heavy build/test commands were executed on `ssh hd01`. | Constraint respected |
 | Build/test on `ssh hd01` | `./scripts/remote-build-hd01.sh` succeeded with Worker typecheck/tests, Go tests, and Docker build. | Complete |
 | Deploy/test with Cloudflare resources | D1 database `c018bec2-7abd-42b8-863d-3030727f0026` was created, remote migration applied, Worker deployed, and smoke test passed. | Complete |
@@ -30,7 +31,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Admin UI interaction test | Playwright on `hd01` verified wrong-token feedback, successful login, dashboard metrics, preferred endpoint creation, proxy node creation, subscription links, and V2Ray preview generation. | Browser verified |
 | Deep cleanup/archive | README, deployment, verification, status, audit, adapter docs, and agent instructions were reconciled after verification. | Complete |
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
-| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3`. | Complete |
+| Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`. | Complete |
 | Local deployment secret management | `.secrets/worker.env` and `.secrets/swarm.env` are documented, ignored by Git, excluded from remote build sync, and consumed by deployment scripts. | Complete |
 
 ## Completed Verification
@@ -38,7 +39,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`15` tests passed)
+- Worker `npm test` (`16` tests passed)
 - Agent `go test ./...`
 - Agent Docker build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local`

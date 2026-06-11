@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { listGeneratedNodes } from "../src/subscriptions";
-import type { Env, PreferredEndpointRow, ProxyNodeRow } from "../src/types";
+import type { Env, PreferredEndpointRow, ProxyNodeRow, TunnelRow } from "../src/types";
 
 type TableMap = {
   nodes: ProxyNodeRow[];
   endpoints: PreferredEndpointRow[];
   endpointSelections?: Array<{ proxy_node_id: string; endpoint_id: string; enabled: number }>;
   tunnelSelections?: Array<Record<string, unknown>>;
+  trafficBindings?: Array<{ proxy_node_id: string; traffic_key: string; enabled: number }>;
+  tunnels?: TunnelRow[];
   sniSelections?: Array<{ proxy_node_id: string; sni_id: string; hostname: string; enabled: number }>;
   groups?: Array<{ name: string; endpoint_mode: string; endpoint_filter_json: string; enabled: number }>;
 };
@@ -33,7 +35,11 @@ class MockStatement {
     if (this.query.includes("FROM proxy_nodes")) return this.tables.nodes;
     if (this.query.includes("FROM preferred_endpoints")) return this.tables.endpoints;
     if (this.query.includes("FROM proxy_node_endpoint_selections")) return this.tables.endpointSelections || [];
+    if (this.query.includes("FROM proxy_node_traffic_bindings")) return this.tables.trafficBindings || [];
     if (this.query.includes("FROM proxy_node_tunnel_selections")) return this.tables.tunnelSelections || [];
+    if (this.query.includes("FROM tunnels")) {
+      return (this.tables.tunnels || []).filter((row) => row.health_status === "healthy");
+    }
     if (this.query.includes("FROM proxy_node_sni_selections")) return this.tables.sniSelections || [];
     if (this.query.includes("FROM groups")) {
       return (this.tables.groups || []).filter((group) => group.name === this.params[0] && group.enabled === 1);
@@ -132,4 +138,66 @@ describe("subscription generation", () => {
 
     expect(generated.map((item) => item.id)).toEqual(["node_1:sni:sni_1:endpoint_1"]);
   });
+
+  it("resolves traffic bindings by swarm node and target using only healthy tunnels", async () => {
+    const trafficKey = "swarm:hd01|target:http://s1:80";
+    const generated = await listGeneratedNodes(env({
+      nodes: [{ ...node("node_1", "content"), use_tunnel: 1 }],
+      endpoints: [endpoint],
+      trafficBindings: [{ proxy_node_id: "node_1", traffic_key: trafficKey, enabled: 1 }],
+      tunnels: [
+        tunnel("tun_bad", "hd01", "http://s1:80", "stale.trycloudflare.com", "degraded", "2026-06-11T01:00:00Z"),
+        tunnel("tun_good", "hd01", "http://s1:80", "fresh.trycloudflare.com", "healthy", "2026-06-11T02:00:00Z")
+      ]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(generated).toHaveLength(1);
+    expect(generated[0]).toMatchObject({
+      id: "node_1:swarm:hd01|target:http://s1:80:endpoint_1",
+      tunnelId: trafficKey,
+      tunnelHost: "fresh.trycloudflare.com"
+    });
+    const parsed = new URL(generated[0].uri || "");
+    expect(parsed.hostname).toBe("104.16.0.1");
+    expect(parsed.searchParams.get("sni")).toBe("fresh.trycloudflare.com");
+    expect(parsed.searchParams.get("host")).toBe("fresh.trycloudflare.com");
+  });
 });
+
+function tunnel(
+  id: string,
+  swarmNode: string,
+  targetUrl: string,
+  publicHostname: string,
+  healthStatus: string,
+  updatedAt: string
+): TunnelRow {
+  return {
+    id,
+    agent_id: "agent_1",
+    tunnel_key: targetUrl.replace(/[^a-zA-Z0-9]+/g, "_"),
+    type: "quick",
+    target_url: targetUrl,
+    public_url: `https://${publicHostname}`,
+    public_hostname: publicHostname,
+    swarm_node_name: swarmNode,
+    metrics_port: 2101,
+    process_status: "running",
+    health_status: healthStatus,
+    last_probe_status: null,
+    failure_count: 0,
+    restart_count: 0,
+    last_error: null,
+    started_at: updatedAt,
+    last_seen_at: updatedAt,
+    last_url_changed_at: updatedAt,
+    last_restart_command_at: null,
+    created_at: updatedAt,
+    updated_at: updatedAt
+  };
+}

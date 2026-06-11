@@ -76,12 +76,12 @@ async function handleSubscription(env: Env, url: URL): Promise<Response> {
 
   const result = await buildSubscription(env, parseSubscriptionOptions(format, url));
   if (env.SUB_CACHE) {
-    await env.SUB_CACHE.put(cacheKey, result.content, { expirationTtl: 120 });
+    await env.SUB_CACHE.put(cacheKey, result.content, { expirationTtl: 300 });
   }
   return new Response(result.content, {
     headers: {
       "content-type": result.contentType,
-      "cache-control": "private, max-age=60"
+      "cache-control": "private, max-age=300"
     }
   });
 }

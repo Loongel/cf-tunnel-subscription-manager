@@ -1,6 +1,7 @@
 import { all, first } from "./db";
 import { encodeBase64, mutateShareUri, toSingBoxOutbound } from "./protocols";
-import type { Env, GeneratedNode, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions } from "./types";
+import { tunnelTrafficKey } from "./tunnel-registry";
+import type { Env, GeneratedNode, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
 import { parseJsonObject } from "./utils";
 
 interface SelectionRow {
@@ -11,9 +12,15 @@ interface SelectionRow {
 
 interface TunnelSelectionRow {
   proxy_node_id: string;
+  traffic_key: string;
   tunnel_id: string;
   public_hostname: string | null;
   public_url: string | null;
+}
+
+interface TrafficBindingRow {
+  proxy_node_id: string;
+  traffic_key: string;
 }
 
 interface SniSelectionRow {
@@ -124,19 +131,26 @@ export async function listGeneratedNodes(env: Env, options: SubscriptionOptions)
 
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, endpoints, selections, tunnelSelections, sniSelections, groupFilter] = await Promise.all([
+  const [nodes, endpoints, selections, trafficBindings, healthyTunnels, sniSelections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
       "SELECT * FROM preferred_endpoints WHERE enabled = 1 ORDER BY sort_order, value"
     ),
     all<SelectionRow>(env.DB, "SELECT * FROM proxy_node_endpoint_selections WHERE enabled = 1"),
-    all<TunnelSelectionRow>(
+    all<TrafficBindingRow>(
       env.DB,
-      `SELECT pts.proxy_node_id, pts.tunnel_id, t.public_hostname, t.public_url
-       FROM proxy_node_tunnel_selections pts
-       JOIN tunnels t ON t.id = pts.tunnel_id
-       WHERE pts.enabled = 1`
+      "SELECT proxy_node_id, traffic_key FROM proxy_node_traffic_bindings WHERE enabled = 1"
+    ),
+    all<TunnelRow>(
+      env.DB,
+      `SELECT * FROM tunnels
+       WHERE type = 'quick'
+         AND health_status = 'healthy'
+         AND public_hostname IS NOT NULL
+         AND public_hostname <> ''
+         AND target_url IS NOT NULL
+         AND target_url <> ''`
     ),
     all<SniSelectionRow>(
       env.DB,
@@ -157,11 +171,20 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     selectedByNode.set(selection.proxy_node_id, set);
   }
 
+  const latestTunnelByTrafficKey = latestHealthyTunnelsByTrafficKey(healthyTunnels);
   const tunnelsByNode = new Map<string, TunnelSelectionRow[]>();
-  for (const selection of tunnelSelections) {
-    const rows = tunnelsByNode.get(selection.proxy_node_id) || [];
-    rows.push(selection);
-    tunnelsByNode.set(selection.proxy_node_id, rows);
+  for (const binding of trafficBindings) {
+    const tunnel = latestTunnelByTrafficKey.get(binding.traffic_key);
+    if (!tunnel) continue;
+    const rows = tunnelsByNode.get(binding.proxy_node_id) || [];
+    rows.push({
+      proxy_node_id: binding.proxy_node_id,
+      traffic_key: binding.traffic_key,
+      tunnel_id: tunnel.id,
+      public_hostname: tunnel.public_hostname,
+      public_url: tunnel.public_url
+    });
+    tunnelsByNode.set(binding.proxy_node_id, rows);
   }
 
   const snisByNode = new Map<string, SniSelectionRow[]>();
@@ -213,7 +236,7 @@ function selectedTrafficForNode(
   const output: Array<{ id: string; sniId?: string; hostname: string | null }> = [];
   if (node.use_tunnel) {
     for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
-      output.push({ id: tunnel.tunnel_id, hostname: tunnel.public_hostname });
+      output.push({ id: tunnel.traffic_key, hostname: tunnel.public_hostname });
     }
   }
   for (const sni of snisByNode.get(node.id) || []) {
@@ -228,15 +251,20 @@ function selectedTunnelsForNode(
 ): TunnelSelectionRow[] {
   const selected = tunnelsByNode.get(node.id);
   if (selected && selected.length > 0) return selected;
-  if (node.selected_tunnel_id) {
-    return [{
-      proxy_node_id: node.id,
-      tunnel_id: node.selected_tunnel_id,
-      public_hostname: node.tunnel_public_hostname || null,
-      public_url: node.tunnel_public_url || null
-    }];
-  }
   return [];
+}
+
+function latestHealthyTunnelsByTrafficKey(tunnels: TunnelRow[]): Map<string, TunnelRow> {
+  const output = new Map<string, TunnelRow>();
+  for (const tunnel of tunnels) {
+    const key = tunnelTrafficKey(tunnel);
+    if (!key) continue;
+    const current = output.get(key);
+    if (!current || Date.parse(tunnel.updated_at || "") > Date.parse(current.updated_at || "")) {
+      output.set(key, tunnel);
+    }
+  }
+  return output;
 }
 
 async function withGroupDefaults(env: Env, options: SubscriptionOptions): Promise<SubscriptionOptions> {

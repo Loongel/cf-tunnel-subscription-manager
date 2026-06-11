@@ -10,6 +10,7 @@ import {
 import { inferProtocol } from "./protocols";
 import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from "./settings";
 import { listGeneratedNodes, parseSubscriptionOptions, previewSubscription } from "./subscriptions";
+import { cleanupStaleTunnels, tunnelTrafficKey, tunnelTrafficLabel } from "./tunnel-registry";
 import type { CustomSniRow, Env, ImportSourceRow, JsonRecord, JsonValue, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
 import {
   boolToInt,
@@ -59,14 +60,26 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
     return json({ agents: await all(env.DB, "SELECT * FROM agents ORDER BY last_seen_at DESC") });
   }
   if (request.method === "GET" && path === "/api/admin/tunnels") {
+    await cleanupStaleTunnels(env);
+    const tunnels = await all<Record<string, unknown>>(
+      env.DB,
+      `SELECT t.*, a.stack_name, a.service_name
+       FROM tunnels t
+       LEFT JOIN agents a ON a.id = t.agent_id
+       ORDER BY t.updated_at DESC`
+    );
     return json({
-      tunnels: await all(
-        env.DB,
-        `SELECT t.*, a.stack_name, a.service_name
-         FROM tunnels t
-         LEFT JOIN agents a ON a.id = t.agent_id
-         ORDER BY t.updated_at DESC`
-      )
+      tunnels: tunnels.map((tunnel) => {
+        const identity = {
+          swarm_node_name: typeof tunnel.swarm_node_name === "string" ? tunnel.swarm_node_name : null,
+          target_url: typeof tunnel.target_url === "string" ? tunnel.target_url : null
+        };
+        return {
+          ...tunnel,
+          traffic_key: tunnelTrafficKey(identity),
+          traffic_label: tunnelTrafficLabel(identity)
+        };
+      })
     });
   }
   if (request.method === "GET" && path === "/api/admin/events") {
@@ -209,6 +222,7 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 }
 
 async function overview(env: Env, includePrivate: boolean): Promise<unknown> {
+  await cleanupStaleTunnels(env);
   const agents = await first<CountRow>(
     env.DB,
     "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END), 0) AS online FROM agents"
@@ -268,6 +282,10 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
     env.DB,
     "SELECT proxy_node_id, tunnel_id FROM proxy_node_tunnel_selections WHERE enabled = 1"
   );
+  const trafficBindings = await all<{ proxy_node_id: string; traffic_key: string }>(
+    env.DB,
+    "SELECT proxy_node_id, traffic_key FROM proxy_node_traffic_bindings WHERE enabled = 1"
+  );
   const sniSelections = await all<{ proxy_node_id: string; sni_id: string }>(
     env.DB,
     "SELECT proxy_node_id, sni_id FROM proxy_node_sni_selections WHERE enabled = 1"
@@ -276,9 +294,10 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
     ...row,
     selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id),
     selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections),
+    selectedTrafficKeys: trafficBindings.filter((item) => item.proxy_node_id === row.id).map((item) => item.traffic_key),
     selectedSniIds: sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => item.sni_id),
     selectedTrafficIds: [
-      ...selectedTunnelIdsForRow(row, tunnelSelections).map((id) => `tunnel:${id}`),
+      ...trafficBindings.filter((item) => item.proxy_node_id === row.id).map((item) => `traffic:${item.traffic_key}`),
       ...sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => `sni:${item.sni_id}`)
     ]
   }));
@@ -300,6 +319,7 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
   const sourceType = optionalString(body.sourceType) || "v2ray_uri";
   const protocol = optionalString(body.protocol) || inferProtocol(rawConfig, sourceType);
   const selectedTunnelIds = selectedTunnelIdsFromBody(body);
+  const selectedTrafficKeys = selectedTrafficKeysFromBody(body);
   const selectedSniIds = selectedSniIdsFromBody(body);
   const timestamp = nowIso();
   await run(
@@ -315,7 +335,7 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
     protocol,
     boolToInt(body.enabled, true),
     body.useTunnel === undefined
-      ? boolToInt(selectedTunnelIds.length > 0 || selectedSniIds.length > 0)
+      ? boolToInt(selectedTunnelIds.length > 0 || selectedTrafficKeys.length > 0 || selectedSniIds.length > 0)
       : boolToInt(body.useTunnel),
     selectedTunnelIds[0] || null,
     timestamp,
@@ -963,6 +983,7 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     body.useTunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel),
     body.selectedTunnelIds === undefined
       && body.selectedTrafficIds === undefined
+      && body.selectedTrafficKeys === undefined
       && body.selectedTunnelId === undefined
       ? current.selected_tunnel_id
       : firstSelectedTunnelId(body),
@@ -988,16 +1009,17 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
     }
   }
   if (Array.isArray(body.selectedTunnelIds)
+    || Array.isArray(body.selectedTrafficKeys)
     || Array.isArray(body.selectedTrafficIds)
     || body.selectedTunnelId !== undefined) {
-    const tunnelIds = selectedTunnelIdsFromBody(body);
-    await run(env.DB, "DELETE FROM proxy_node_tunnel_selections WHERE proxy_node_id = ?", nodeId);
-    for (const tunnelId of tunnelIds) {
+    const trafficKeys = selectedTrafficKeysFromBody(body);
+    await run(env.DB, "DELETE FROM proxy_node_traffic_bindings WHERE proxy_node_id = ?", nodeId);
+    for (const trafficKey of trafficKeys) {
       await run(
         env.DB,
-        "INSERT OR REPLACE INTO proxy_node_tunnel_selections (proxy_node_id, tunnel_id, enabled) VALUES (?, ?, 1)",
+        "INSERT OR REPLACE INTO proxy_node_traffic_bindings (proxy_node_id, traffic_key, enabled) VALUES (?, ?, 1)",
         nodeId,
-        tunnelId
+        trafficKey
       );
     }
   }
@@ -1031,6 +1053,21 @@ function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
   const single = optionalString(body.selectedTunnelId);
   if (single) ids.unshift(single);
   return Array.from(new Set(ids));
+}
+
+function selectedTrafficKeysFromBody(body: JsonRecord): string[] {
+  const raw = body.selectedTrafficKeys;
+  const keys = Array.isArray(raw)
+    ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
+    : [];
+  const traffic = body.selectedTrafficIds;
+  if (Array.isArray(traffic)) {
+    keys.push(...traffic
+      .filter((id): id is string => typeof id === "string" && id.startsWith("traffic:"))
+      .map((id) => id.slice("traffic:".length).trim())
+      .filter(Boolean));
+  }
+  return Array.from(new Set(keys));
 }
 
 function selectedSniIdsFromBody(body: JsonRecord): string[] {

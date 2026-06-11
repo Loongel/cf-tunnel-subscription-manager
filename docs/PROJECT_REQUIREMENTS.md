@@ -63,7 +63,7 @@ Worker 不能假设可以从公网直接访问 Docker Swarm 内部的 agent 控�
 因此第一版采用：
 
 - Worker 写入 `commands` 表。
-- Agent 每隔 15-30 秒调用 `/api/agent/commands` 拉取待执行命令。
+- Agent 默认每 120 秒调用 `/api/agent/commands` 拉取待执行命令；收到命令后短暂使用 5 秒快速轮询，避免常态高频请求。
 - Agent 执行后调用 `/api/agent/commands/:id/ack` 确认结果。
 
 这样能穿透各种 NAT、Swarm overlay 网络和防火墙环境。
@@ -106,7 +106,7 @@ MVP 默认方案：
 
 1. Agent 在线状态
    - 根据 agent 心跳判断。
-   - 超过 `2 * HEARTBEAT_INTERVAL` 未上报为 `stale`。
+   - 超过 6 分钟未上报为 `stale`，避免默认 120 秒心跳下误判。
 
 2. Tunnel 进程状态
    - Agent 记录 cloudflared 进程是否运行、是否输出了公网 URL、metrics ready 是否可用。
@@ -118,6 +118,39 @@ MVP 默认方案：
    - 非 HTTP/HTTPS 目标第一版不做 Worker 公网探测，只展示 agent 上报的本地状态。
 
 重启策略：
+
+### 4.5 后续低请求量状态通道 TODO
+
+当前第一版通过 Worker API 接收 agent 心跳、命令轮询和事件上报。它实现简单、可审计，但当 agent 数量增加或订阅客户端频繁拉取时，Worker 每日请求数会明显增长。
+
+后续可以评估一个低请求量状态通道：
+
+1. Agent 负责本地健康探测
+   - Agent 自己探测 `cloudflared` 进程、metrics、quick tunnel URL、目标服务本地可达性和公网 HTTP/HTTPS 可达性。
+   - Agent 只把聚合后的状态、最近错误、当前 public host、更新时间写入外部状态通道。
+   - 状态变化时立即写；无变化时按较低频率续租。
+
+2. 外部状态通道只保存短期 lease/status
+   - 可选方案：Redis/Valkey/Upstash 这类带 TTL 的外部状态存储。
+   - Key 建议按 `agent:{agentId}`、`tunnel:{swarmNode}:{targetUrl}`、`command-ack:{id}` 组织。
+   - Value 保存精简 JSON：`agentId`、`swarmNodeName`、`targetUrl`、`publicHostname`、`healthStatus`、`probeStatus`、`updatedAt`、`expiresAt`。
+   - TTL 到期即视为 stale/offline，不需要 Worker 高频写数据库。
+
+3. Worker 读取方式
+   - Worker 不应设计成每 10 秒常驻轮询；Cloudflare Workers 是请求/事件驱动，不适合 sub-minute 常驻调度。
+   - Admin UI、订阅生成、手动刷新、低频 Cron 可以按需读取状态通道。
+   - D1 仍然保存配置、绑定、分组、命令、审计事件；外部状态通道只保存临时活动状态。
+
+4. Cloudflare KV 评估边界
+   - KV 可用于状态缓存或订阅输出缓存，但有最终一致性，不适合作为强实时命令队列或唯一 liveness 来源。
+   - 如果让 agent 直接写 KV，需要在 agent 侧保存 Cloudflare API token，安全边界比当前 `AGENT_TOKEN` 更重，应谨慎。
+   - 如果 agent 仍通过 Worker 写 KV，则 Worker 请求数不会明显下降，只是减少 D1 写入，不解决本次请求量问题。
+
+5. 更推荐的落地顺序
+   - 先保留当前 Worker API 作为控制面和兜底。
+   - 新增可选 `STATE_BACKEND=redis` agent 模式，agent 直接写外部 Redis/Upstash TTL key。
+   - Worker 新增只读状态适配器，在 `/api/admin/tunnels` 和订阅生成时优先读取 Redis 状态，D1 仅保存稳定配置和历史审计。
+   - 验证成熟后，再降低或关闭常规 heartbeat/command poll，仅保留低频兜底上报。
 
 - 单次探测失败只标记 `degraded`。
 - 连续失败达到阈值后标记 `unhealthy`。
@@ -183,8 +216,8 @@ MVP 默认方案：
 | `SWARM_NODE_NAME` | 建议 | Docker Swarm 节点名。可由 `${DEPLOY_NODE}` 注入。 |
 | `STACK_NAME` | 建议 | stack 名，用于定位来源。 |
 | `SERVICE_NAME` | 建议 | 服务名，用于定位来源。 |
-| `HEARTBEAT_INTERVAL` | 否 | 心跳间隔，默认 `30s`。 |
-| `COMMAND_POLL_INTERVAL` | 否 | 命令轮询间隔，默认 `20s`。 |
+| `HEARTBEAT_INTERVAL` | 否 | 心跳间隔，默认 `120s`。 |
+| `COMMAND_POLL_INTERVAL` | 否 | 命令轮询常规间隔，默认 `120s`；收到命令后短暂使用 5 秒快速轮询。 |
 | `RESTART_COOLDOWN_SECONDS` | 否 | quick tunnel 自动重启退避，默认 `610`。 |
 | `EDGE_IP_VERSION` | 否 | 传给 `cloudflared --edge-ip-version`，支持 `auto`、`4`、`6`；Docker Swarm overlay 网络建议用 `auto`。 |
 
@@ -200,7 +233,7 @@ Agent 启动后向 Worker 注册：
   "swarmNodeName": "wawo01",
   "stackName": "edge",
   "serviceName": "cloudflared",
-  "imageVersion": "ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3",
+  "imageVersion": "ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4",
   "cloudflaredVersion": "2026.x.x",
   "capabilities": {
     "fixedTunnel": true,
@@ -673,7 +706,7 @@ UI 目标是“运维控制台”，不是营销页。信息应紧凑、可扫�
 
 ```yaml
 cloudflared:
-  image: ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3
+  image: ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4
   hostname: cloudflared
   networks:
     - aa_host_bridge

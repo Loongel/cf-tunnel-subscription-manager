@@ -26,6 +26,7 @@ Production Worker resource name remains `cf-tunnel-control-plane` to preserve th
   - Multiple quick tunnel supervision with independent metrics ports.
   - TryCloudflare URL parsing and local `tunnels.list` compatibility.
   - Worker registration, heartbeat, event reporting, command polling, restart handling.
+  - Request-conservative defaults: heartbeat and command polling default to 120 seconds, with short 5 second follow-up polling only after commands are received.
   - Container health endpoint.
 - Docker and deployment templates:
   - Agent Dockerfile with pinned `cloudflared 2026.6.0`.
@@ -43,10 +44,10 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - `./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`15` tests passed)
+- Worker `npm test` (`16` tests passed)
 - Agent `go test ./...`
 - Agent Docker image build with `cloudflared 2026.6.0`
-- Production agent image configured as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3`
+- Production agent image configured as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`
 - Worker `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
 - Worker `npx wrangler deploy --dry-run`
 - Remote D1 database `cf-tunnel-control-plane` created with ID `c018bec2-7abd-42b8-863d-3030727f0026`
@@ -62,8 +63,6 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Admin UI Chromium smoke passed on 2026-06-11 after layout cleanup: authenticated page no longer shows stale public-status notice, Proxy Nodes endpoint counts reflect loaded global endpoints, and Saved Groups chips render compactly.
 - Endpoint-binding regression test passed: refreshing imported nodes preserves node-scoped endpoint selections for future refreshes.
 - Worker deployed version `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
-- Public agent image `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` was published by GitHub Actions, anonymously pulled, and verified to report `cloudflared version 2026.6.0`
-- Agent image digest: `sha256:0506a8879eb66de6905b1a610f91d2f59a481e4d6ecf7ae3cc209f98de9ab604`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`
 
 Additional checks:
@@ -84,3 +83,9 @@ The file is not in the repository and contains `ADMIN_TOKEN`, `AGENT_TOKEN`, and
 
 - Deploy the production Swarm stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.
 - Keep the old Worker and D1 data until the new deployment is verified and critical data has been migrated.
+- Evaluate a low-request state channel for agent/tunnel liveness:
+  - Goal: reduce Worker request volume by moving frequent agent liveness writes and tunnel probes out of Worker request endpoints.
+  - Preferred shape: agent probes tunnels locally and writes compact lease/status records to an external low-cost state channel such as Redis/Valkey/Upstash with TTL; Worker reads that state on demand for admin UI/subscription generation and uses low-frequency cron only as a fallback.
+  - Cloudflare KV can be evaluated for coarse status/cache data, but its eventual consistency and direct-write credential requirements make it a weaker fit for real-time liveness and command delivery.
+  - Do not design this as a Worker process polling every 10 seconds; Workers are request/event driven, and sub-minute continuous polling is not a good fit. Use TTL leases, read-on-demand, and event/change-driven updates instead.
+  - Keep D1 as the source of truth for configuration, bindings, groups, commands, and audit history; the external state channel should hold ephemeral status only.

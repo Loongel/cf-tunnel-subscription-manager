@@ -610,10 +610,7 @@ export function renderAdminUi(env: Env): string {
       state.nodes = data.proxyNodes || [];
       renderBindingNodeList();
       nodesBody.innerHTML = state.nodes.map((row) => {
-        const trafficIds = row.selectedTrafficIds || [
-          ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
-          ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
-        ];
+        const trafficIds = trafficIdsForNode(row);
         const path = trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
         const endpointText = globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional';
         return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
@@ -660,9 +657,11 @@ export function renderAdminUi(env: Env): string {
     function renderTunnelOptions() {
       const selected = new Set(selectedValues(byId('bindingTraffic')));
       const query = filterText('bindingTrafficFilter');
-      const tunnelOptions = state.tunnels.map((t) => {
-        const value = 'tunnel:' + t.id;
-        const label = 'Tunnel: ' + (t.public_hostname || t.tunnel_key) + ' / ' + (t.target_url || t.swarm_node_name || t.agent_id);
+      const tunnelOptions = state.tunnels.filter((t) =>
+        t.health_status === 'healthy' && t.traffic_key && t.public_hostname && t.target_url
+      ).map((t) => {
+        const value = 'traffic:' + t.traffic_key;
+        const label = 'Tunnel: ' + (t.traffic_label || ((t.swarm_node_name || 'unknown-node') + ' -> ' + (t.target_url || 'unknown-target')));
         if (query && !selected.has(value) && !label.toLowerCase().includes(query)) return '';
         return '<option value="' + esc(value) + '">' + esc(label) + '</option>';
       }).join('');
@@ -676,13 +675,16 @@ export function renderAdminUi(env: Env): string {
       byId('bindingTraffic').innerHTML = options;
       markSelected(byId('bindingTraffic'), Array.from(selected));
     }
+    function trafficIdsForNode(node) {
+      return node.selectedTrafficIds || [
+        ...(node.selectedTrafficKeys || []).map((id) => 'traffic:' + id),
+        ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
+      ];
+    }
     function renderBindingNodeList() {
       const selected = new Set(selectedBindingNodeIds().filter((id) => state.nodes.some((node) => node.id === id)));
       byId('bindingNodes').innerHTML = state.nodes.map((n) => {
-        const trafficIds = n.selectedTrafficIds || [
-          ...(n.selectedTunnelIds || (n.selected_tunnel_id ? [n.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
-          ...(n.selectedSniIds || []).map((id) => 'sni:' + id)
-        ];
+        const trafficIds = trafficIdsForNode(n);
         const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
         return '<option value="' + esc(n.id) + '">' + esc(n.name + ' / ' + n.protocol + ' / ' + traffic) + '</option>';
       }).join('');
@@ -693,10 +695,7 @@ export function renderAdminUi(env: Env): string {
       updateBindingSelectedCount();
     }
     function bindingNodeRowHtml(node, selected) {
-      const trafficIds = node.selectedTrafficIds || [
-        ...(node.selectedTunnelIds || (node.selected_tunnel_id ? [node.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
-        ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
-      ];
+      const trafficIds = trafficIdsForNode(node);
       const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
       const endpoints = globalEndpointCount() + '+' + ((node.selectedEndpointIds || []).length);
       return '<label class="binding-row' + (selected ? ' selected' : '') + '">' +
@@ -709,10 +708,7 @@ export function renderAdminUi(env: Env): string {
       const query = filterText('bindingNodeFilter');
       const mode = byId('bindingNodeStatus').value;
       return state.nodes.filter((node) => {
-        const trafficIds = node.selectedTrafficIds || [
-          ...(node.selectedTunnelIds || (node.selected_tunnel_id ? [node.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
-          ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
-        ];
+        const trafficIds = trafficIdsForNode(node);
         if (mode === 'enabled' && !node.enabled) return false;
         if (mode === 'direct' && trafficIds.length > 0) return false;
         if (mode === 'traffic' && trafficIds.length === 0) return false;
@@ -988,10 +984,7 @@ export function renderAdminUi(env: Env): string {
       byId('bindingNodeStatus').value = 'all';
       renderBindingNodeList();
       markBindingNodes([row.id]);
-      const traffic = row.selectedTrafficIds || [
-        ...(row.selectedTunnelIds || (row.selected_tunnel_id ? [row.selected_tunnel_id] : [])).map((id) => 'tunnel:' + id),
-        ...(row.selectedSniIds || []).map((id) => 'sni:' + id)
-      ];
+      const traffic = trafficIdsForNode(row);
       markSelected(byId('bindingTraffic'), traffic);
       markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
     }

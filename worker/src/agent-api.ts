@@ -26,8 +26,15 @@ export async function handleAgentApi(request: Request, env: Env, url: URL): Prom
   if (request.method === "POST" && path === "/api/agent/heartbeat") {
     const body = await readJson<AgentHeartbeatBody>(request);
     await upsertAgent(env, body);
+    const reportedTunnelKeys: string[] = [];
     for (const tunnel of body.tunnels || []) {
+      if (typeof tunnel.tunnelKey === "string" && tunnel.tunnelKey.trim() !== "") {
+        reportedTunnelKeys.push(tunnel.tunnelKey.trim());
+      }
       await upsertTunnel(env, body, tunnel);
+    }
+    if (Array.isArray(body.tunnels)) {
+      await deleteMissingAgentTunnels(env, requiredString(body.agentId, "agentId"), reportedTunnelKeys);
     }
     return json({ ok: true });
   }
@@ -189,6 +196,21 @@ async function upsertTunnel(env: Env, agent: AgentHeartbeatBody, tunnel: TunnelS
   }
 }
 
+async function deleteMissingAgentTunnels(env: Env, agentId: string, reportedTunnelKeys: string[]): Promise<void> {
+  if (reportedTunnelKeys.length === 0) {
+    await run(env.DB, "DELETE FROM tunnels WHERE agent_id = ?", agentId);
+    return;
+  }
+  const unique = Array.from(new Set(reportedTunnelKeys));
+  const placeholders = unique.map(() => "?").join(", ");
+  await run(
+    env.DB,
+    `DELETE FROM tunnels WHERE agent_id = ? AND tunnel_key NOT IN (${placeholders})`,
+    agentId,
+    ...unique
+  );
+}
+
 export async function insertEvent(
   env: Env,
   agentId: string | null,
@@ -226,4 +248,3 @@ function stableTunnelId(agentId: string, tunnelKey: string): string {
   const safe = `${agentId}_${tunnelKey}`.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return `tun_${safe.slice(0, 96)}`;
 }
-

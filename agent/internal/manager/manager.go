@@ -165,17 +165,22 @@ func (m *Manager) commandLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.pollCommands(ctx)
+			if m.pollCommands(ctx) {
+				ticker.Reset(5 * time.Second)
+			} else {
+				ticker.Reset(m.cfg.CommandPollInterval)
+			}
 		}
 	}
 }
 
-func (m *Manager) pollCommands(ctx context.Context) {
+func (m *Manager) pollCommands(ctx context.Context) bool {
 	commands, err := m.client.Commands(ctx, m.cfg.AgentID, m.cfg.InstanceID)
 	if err != nil {
 		log.Printf("[agent] command poll failed: %v", err)
-		return
+		return false
 	}
+	hadCommands := len(commands) > 0
 	for _, cmd := range commands {
 		status := "succeeded"
 		result := map[string]any{"message": "ok"}
@@ -187,6 +192,7 @@ func (m *Manager) pollCommands(ctx context.Context) {
 			log.Printf("[agent] command ack failed: %v", err)
 		}
 	}
+	return hadCommands
 }
 
 func (m *Manager) executeCommand(cmd client.Command) error {
