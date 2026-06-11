@@ -939,7 +939,9 @@ export function renderAdminUi(env: Env): string {
       const displayNamesByKey = {};
       state.importCandidates.forEach((item) => {
         if (!item.importKey) return;
-        displayNamesByKey[item.importKey] = item.name;
+        if ((item.name || '').trim() && (item.name || '').trim() !== (item.originalName || '').trim()) {
+          displayNamesByKey[item.importKey] = item.name.trim();
+        }
         if (!item.removed && item.asTlsCarrier) carrierKeys.push(item.importKey);
         const parentKeys = parentIdsForItem(item)
           .map((id) => candidateById.get(id))

@@ -525,9 +525,12 @@ function disambiguateImportVariantNames(variants: ImportVariant[]): void {
       const suffix = item.identity ? item.identity.contentHash.slice(0, 6) : "";
       const sourceLabel = compactImportSourceLabel(item.sourceName);
       let nextName = sourceLabel ? `${sourceLabel} ${item.name}` : item.name;
-      if (seen.has(nextName) && suffix) nextName = `${item.name} #${suffix}`;
+      if (seen.has(nextName) && suffix) {
+        nextName = sourceLabel ? `${sourceLabel} ${item.name} #${suffix}` : `${item.name} #${suffix}`;
+      }
       while (seen.has(nextName) && item.identity) {
-        nextName = `${item.name} #${item.identity.contentHash.slice(0, 10)}`;
+        const longSuffix = item.identity.contentHash.slice(0, 10);
+        nextName = sourceLabel ? `${sourceLabel} ${item.name} #${longSuffix}` : `${item.name} #${longSuffix}`;
       }
       item.name = nextName;
       seen.add(nextName);
