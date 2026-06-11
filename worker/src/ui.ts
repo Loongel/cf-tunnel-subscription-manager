@@ -236,7 +236,7 @@ export function renderAdminUi(env: Env): string {
     </div>
   </header>
   <main>
-    <div id="notice" class="notice warn show"><span id="noticeText">Public status loaded. Login unlocks management actions.</span><button id="noticeClose" aria-label="Dismiss notice">x</button></div>
+    <div id="notice" class="notice"><span id="noticeText"></span><button id="noticeClose" aria-label="Dismiss notice">x</button></div>
     <nav id="tabs">
       <button data-tab="dashboard" class="active">Dashboard</button>
       <button data-tab="tunnels">Tunnels</button>
