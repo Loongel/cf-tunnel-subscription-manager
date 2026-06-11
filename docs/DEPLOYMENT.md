@@ -45,6 +45,7 @@ File purposes:
 | Worker URL currently used by this deployment | `https://cf-tunnel-control-plane.officesline.workers.dev` |
 | D1 database name currently used by this deployment | `cf-tunnel-control-plane` |
 | Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.3` |
+| Agent image digest | `sha256:0506a8879eb66de6905b1a610f91d2f59a481e4d6ecf7ae3cc209f98de9ab604` |
 | Agent image fallback for local testing | `cf-tunnel-agent:test` |
 | Pinned cloudflared version | `2026.6.0` |
 
