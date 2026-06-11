@@ -1095,6 +1095,17 @@ function selectedTrafficKeysFromBody(body: JsonRecord): string[] {
       .map((id) => id.slice("traffic:".length).trim())
       .filter(Boolean));
   }
+  // Support legacy cached UI clients
+  const legacyTunnels = body.selectedTunnelIds;
+  if (Array.isArray(legacyTunnels)) {
+    keys.push(...legacyTunnels
+      .filter((id): id is string => typeof id === "string" && id.startsWith("tunnel:"))
+      .map((id) => id.slice("tunnel:".length).trim())
+      .filter(Boolean));
+  }
+  if (typeof body.selectedTunnelId === "string" && body.selectedTunnelId.trim() !== "") {
+    if (!keys.includes(body.selectedTunnelId.trim())) keys.push(body.selectedTunnelId.trim());
+  }
   return Array.from(new Set(keys));
 }
 

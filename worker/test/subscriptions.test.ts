@@ -9,7 +9,14 @@ type TableMap = {
   tunnelSelections?: Array<Record<string, unknown>>;
   trafficBindings?: Array<{ proxy_node_id: string; traffic_key: string; enabled: number }>;
   tunnels?: TunnelRow[];
-  sniSelections?: Array<{ proxy_node_id: string; sni_id: string; hostname: string; enabled: number }>;
+  sniSelections?: Array<{
+    proxy_node_id: string;
+    sni_id: string;
+    hostname: string;
+    sni_name?: string;
+    sni_remark?: string | null;
+    enabled: number;
+  }>;
   groups?: Array<{ name: string; endpoint_mode: string; endpoint_filter_json: string; enabled: number }>;
 };
 
@@ -95,7 +102,14 @@ describe("subscription generation", () => {
     const generated = await listGeneratedNodes(env({
       nodes: [node("node_1", "content")],
       endpoints: [endpoint],
-      sniSelections: [{ proxy_node_id: "node_1", sni_id: "sni_1", hostname: "edge.example.com", enabled: 1 }]
+      sniSelections: [{
+        proxy_node_id: "node_1",
+        sni_id: "sni_1",
+        hostname: "edge.example.com",
+        sni_name: "edge-sni",
+        sni_remark: "edge remark",
+        enabled: 1
+      }]
     }), {
       format: "v2ray",
       group: null,
@@ -108,6 +122,7 @@ describe("subscription generation", () => {
       id: "node_1:sni:sni_1:endpoint_1",
       sourceNodeId: "node_1",
       sniId: "sni_1",
+      trafficLabel: "edge remark",
       endpointValue: "104.16.0.1",
       tunnelHost: "edge.example.com"
     });
@@ -118,11 +133,18 @@ describe("subscription generation", () => {
     expect(parsed.searchParams.get("host")).toBe("edge.example.com");
   });
 
-  it("falls back to current generated nodes from the same source when saved group member ids are stale", async () => {
+  it("does not expand stale group member ids to all current derived nodes", async () => {
     const generated = await listGeneratedNodes(env({
       nodes: [node("node_1", "content-a"), node("node_2", "content-b")],
       endpoints: [endpoint],
-      sniSelections: [{ proxy_node_id: "node_1", sni_id: "sni_1", hostname: "edge.example.com", enabled: 1 }],
+      sniSelections: [{
+        proxy_node_id: "node_1",
+        sni_id: "sni_1",
+        hostname: "edge.example.com",
+        sni_name: "edge-sni",
+        sni_remark: null,
+        enabled: 1
+      }],
       groups: [{
         name: "abcd",
         endpoint_mode: "selected",
@@ -136,7 +158,7 @@ describe("subscription generation", () => {
       endpointMode: "selected"
     });
 
-    expect(generated.map((item) => item.id)).toEqual(["node_1:sni:sni_1:endpoint_1"]);
+    expect(generated.map((item) => item.id)).toEqual([]);
   });
 
   it("resolves traffic bindings by swarm node and target using only healthy tunnels", async () => {
@@ -160,6 +182,7 @@ describe("subscription generation", () => {
     expect(generated[0]).toMatchObject({
       id: "node_1:swarm:hd01|target:http://s1:80:endpoint_1",
       tunnelId: trafficKey,
+      trafficLabel: "hd01 -> http://s1:80",
       tunnelHost: "fresh.trycloudflare.com"
     });
     const parsed = new URL(generated[0].uri || "");

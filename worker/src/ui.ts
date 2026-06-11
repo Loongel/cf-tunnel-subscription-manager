@@ -625,6 +625,7 @@ export function renderAdminUi(env: Env): string {
       const data = await api('/api/admin/proxy-nodes');
       state.nodes = data.proxyNodes || [];
       renderBindingNodeList();
+      syncBindingEditorFromSelection();
       nodesBody.innerHTML = state.nodes.map((row) => {
         const trafficIds = trafficIdsForNode(row);
         const path = trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
@@ -692,6 +693,16 @@ export function renderAdminUi(env: Env): string {
       byId('bindingTraffic').innerHTML = options;
       markSelected(byId('bindingTraffic'), Array.from(selected));
     }
+    function syncBindingEditorFromSelection() {
+      const ids = selectedBindingNodeIds();
+      if (ids.length !== 1) return;
+      const row = state.nodes.find((item) => item.id === ids[0]);
+      if (!row) return;
+      renderTunnelOptions();
+      renderEndpointOptions();
+      markSelected(byId('bindingTraffic'), trafficIdsForNode(row));
+      markSelected(byId('bindingEndpoints'), row.selectedEndpointIds || []);
+    }
     function trafficIdsForNode(node) {
       return node.selectedTrafficIds || [
         ...(node.selectedTrafficKeys || []).map((id) => 'traffic:' + id),
@@ -740,9 +751,9 @@ export function renderAdminUi(env: Env): string {
         '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
       ).join('');
       const options = bindingEndpoints().map((e) => {
-        const label = (e.label || e.value) + ' / ' + e.type;
+        const label = e.label || e.value;
         if (query && !selected.has(e.id) && !label.toLowerCase().includes(query)) return '';
-        return '<option value="' + esc(e.id) + '">' + esc(label) + '</option>';
+        return '<option value="' + esc(e.id) + '">' + esc(label) + ' / ' + esc(e.type) + '</option>';
       }).join('');
       byId('bindingEndpoints').innerHTML = globals + options;
       markSelected(byId('bindingEndpoints'), Array.from(selected));
@@ -773,7 +784,7 @@ export function renderAdminUi(env: Env): string {
       const mode = byId('groupCandidateMode').value;
       return state.generatedNodes.filter((item) => {
         const label = derivedFullLabel(item).toLowerCase();
-        const haystack = [item.sourceName, label, item.endpointValue, item.tunnelHost, item.protocol].filter(Boolean).join(' ').toLowerCase();
+        const haystack = [item.sourceName, label, item.endpointValue, item.trafficLabel, item.tunnelHost, item.protocol].filter(Boolean).join(' ').toLowerCase();
         if (mode === 'selected' && !selected.has(item.id)) return false;
         if (query && !haystack.includes(query)) return false;
         return true;
@@ -999,7 +1010,11 @@ export function renderAdminUi(env: Env): string {
     function loadBindingFromNode(row) {
       byId('bindingNodeFilter').value = '';
       byId('bindingNodeStatus').value = 'all';
+      byId('bindingTrafficFilter').value = '';
+      byId('bindingEndpointFilter').value = '';
       renderBindingNodeList();
+      renderTunnelOptions();
+      renderEndpointOptions();
       markBindingNodes([row.id]);
       const traffic = trafficIdsForNode(row);
       markSelected(byId('bindingTraffic'), traffic);
@@ -1034,15 +1049,14 @@ export function renderAdminUi(env: Env): string {
     }
     function derivedParts(item) {
       const parts = [];
-      if (item.tunnelHost) {
-        const label = item.trafficLabel || item.tunnelHost;
-        parts.push({ label: label, value: item.tunnelHost });
+      if (item.tunnelHost || item.sniId) {
+        const label = item.trafficLabel || item.tunnelHost || item.sniId;
+        parts.push({ label: label, value: label });
       }
       if (item.endpointId || item.endpointValue) {
         const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
         const label = endpoint ? (endpoint.label || endpoint.value) : (item.endpointLabel || item.endpointValue || item.endpointId);
-        const value = endpoint ? endpoint.value : (item.endpointValue || item.endpointId);
-        parts.push({ label, value });
+        parts.push({ label, value: label });
       }
       return parts;
     }
@@ -1488,15 +1502,21 @@ export function renderAdminUi(env: Env): string {
         const ids = selectedBindingNodeIds();
         if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
         const selectedTrafficIds = selectedValues(byId('bindingTraffic'));
+        const selectedEndpointIds = selectedAdditionalEndpointIds();
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
             useTunnel: selectedTrafficIds.length > 0,
             selectedTrafficIds,
-            selectedEndpointIds: selectedAdditionalEndpointIds()
+            selectedEndpointIds
           })
         })));
         await refreshNodes();
+        renderTunnelOptions();
+        renderEndpointOptions();
+        markBindingNodes(ids.filter((id) => state.nodes.some((node) => node.id === id)));
+        markSelected(byId('bindingTraffic'), selectedTrafficIds);
+        markSelected(byId('bindingEndpoints'), selectedEndpointIds);
         await refreshGeneratedNodes();
         await refreshGroups();
         setNotice('Binding applied to ' + ids.length + ' node(s).', 'ok');

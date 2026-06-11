@@ -41,7 +41,6 @@ interface GroupRow {
 interface GroupFilter {
   exists: boolean;
   derivedIds: Set<string>;
-  sourceNodeIds: Set<string>;
 }
 
 const VALID_ENDPOINT_MODES = new Set(["selected", "ip", "domain", "all", "none"]);
@@ -293,7 +292,7 @@ async function loadGroupFilter(
     "SELECT endpoint_mode, endpoint_filter_json, enabled FROM groups WHERE name = ? AND enabled = 1",
     groupName
   );
-  if (!group) return { exists: false, derivedIds: new Set(), sourceNodeIds: new Set() };
+  if (!group) return { exists: false, derivedIds: new Set() };
 
   const filter = parseJsonObject(group.endpoint_filter_json);
   const derivedIds = Array.isArray(filter.derivedNodeIds)
@@ -301,8 +300,7 @@ async function loadGroupFilter(
     : [];
   return {
     exists: true,
-    derivedIds: new Set(derivedIds),
-    sourceNodeIds: new Set(derivedIds.map(sourceNodeIdFromGeneratedId).filter((id): id is string => Boolean(id)))
+    derivedIds: new Set(derivedIds)
   };
 }
 
@@ -312,14 +310,7 @@ function filterGeneratedByGroup(
 ): GeneratedNode[] {
   if (!groupFilter) return generated;
   if (groupFilter.exists === false) return [];
-  const exact = generated.filter((item) => groupFilter.derivedIds.has(item.id));
-  if (exact.length > 0 || groupFilter.sourceNodeIds.size === 0) return exact;
-  return generated.filter((item) => groupFilter.sourceNodeIds.has(item.sourceNodeId));
-}
-
-function sourceNodeIdFromGeneratedId(id: string): string | null {
-  const match = /^(node_[^:]+):/.exec(id);
-  return match ? match[1] : null;
+  return generated.filter((item) => groupFilter.derivedIds.has(item.id));
 }
 
 function selectEndpoints(
