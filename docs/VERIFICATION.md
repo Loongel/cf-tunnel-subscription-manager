@@ -23,6 +23,13 @@ go test ./...
 docker build --build-arg CLOUDFLARED_VERSION=2026.6.0 -t cf-tunnel-agent:test .
 ```
 
+After a version tag is pushed, verify the published image:
+
+```bash
+docker pull ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1
+docker run --rm ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1 cloudflared --version
+```
+
 ## Smoke Checks
 
 - `POST /api/agent/register` accepts `AGENT_TOKEN`.
@@ -51,6 +58,7 @@ Executed on `ssh hd01`:
 - Worker `npm test` (`15` Vitest tests passed)
 - Agent `go test ./...`
 - Agent Docker build with `cloudflared 2026.6.0`
+- Agent image release workflow configured for GHCR image `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1`
 - `npm run d1:migrate:local` (`0001_initial.sql`, `19` commands)
 - `npx wrangler deploy --dry-run`
 - `npx wrangler d1 create cf-tunnel-control-plane`

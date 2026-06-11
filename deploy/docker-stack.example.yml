@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   cloudflared:
-    image: ${AGENT_IMAGE:-cf-tunnel-agent:test}
+    image: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1}
     hostname: cloudflared
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:1984/health >/dev/null || exit 1"]
@@ -25,16 +25,21 @@ services:
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN}
       QUICK_TUNNELS: ${QUICK_TUNNELS}
-      FIXED_METRICS_PORT_BASE: "2000"
-      QUICK_METRICS_PORT_BASE: "2100"
+      FIXED_METRICS_PORT_BASE: ${FIXED_METRICS_PORT_BASE:-2000}
+      QUICK_METRICS_PORT_BASE: ${QUICK_METRICS_PORT_BASE:-2100}
       EDGE_IP_VERSION: ${EDGE_IP_VERSION:-auto}
       LOG_FILE: /temp-tunnel/history.log
       MAP_FILE: /temp-tunnel/tunnels.list
       WORKER_BASE_URL: ${WORKER_BASE_URL}
       AGENT_TOKEN: ${AGENT_TOKEN}
+      HEARTBEAT_INTERVAL: ${HEARTBEAT_INTERVAL:-30s}
+      COMMAND_POLL_INTERVAL: ${COMMAND_POLL_INTERVAL:-20s}
+      RESTART_COOLDOWN_SECONDS: ${RESTART_COOLDOWN_SECONDS:-610}
+      QUICK_START_SPACING: ${QUICK_START_SPACING:-20s}
       SWARM_NODE_NAME: ${DEPLOY_NODE}
       STACK_NAME: ${STACK_NAME}
       SERVICE_NAME: cloudflared
+      IMAGE_VERSION: ${AGENT_IMAGE:-ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1}
 
 networks:
   aa_host_bridge:

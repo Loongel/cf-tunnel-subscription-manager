@@ -200,7 +200,7 @@ Agent 启动后向 Worker 注册：
   "swarmNodeName": "wawo01",
   "stackName": "edge",
   "serviceName": "cloudflared",
-  "imageVersion": "cf-tunnel-agent:0.1.0",
+  "imageVersion": "ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1",
   "cloudflaredVersion": "2026.x.x",
   "capabilities": {
     "fixedTunnel": true,
@@ -673,7 +673,7 @@ UI 目标是“运维控制台”，不是营销页。信息应紧凑、可扫�
 
 ```yaml
 cloudflared:
-  image: your-registry/cf-tunnel-agent:0.1.0
+  image: ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1
   hostname: cloudflared
   networks:
     - aa_host_bridge

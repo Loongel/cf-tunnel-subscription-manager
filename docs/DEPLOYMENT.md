@@ -1,93 +1,186 @@
 # Cloudflare Tunnel Subscription Manager Deployment Guide
 
-This guide intentionally uses placeholders. Do not commit real Cloudflare tokens.
+This guide is written for a fresh operator deploying the project without reading the source code. It uses placeholders and must not contain real Cloudflare tokens.
 
-The project repository is `cf-tunnel-subscription-manager`. The deployed Worker and D1 resource names currently remain `cf-tunnel-control-plane` to preserve the existing production URL and database binding.
+Existing deployments should keep the old Worker and data until the new Worker, D1 data, and agent image are verified.
 
-## Worker
+## Release Artifacts
 
-1. Create Cloudflare resources:
+| Artifact | Value |
+| --- | --- |
+| Repository | `https://github.com/Loongel/cf-tunnel-subscription-manager` |
+| Worker script name | `cf-tunnel-control-plane` |
+| Worker URL currently used by this deployment | `https://cf-tunnel-control-plane.officesline.workers.dev` |
+| D1 database name currently used by this deployment | `cf-tunnel-control-plane` |
+| Agent image | `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1` |
+| Agent image fallback for local testing | `cf-tunnel-agent:test` |
+| Pinned cloudflared version | `2026.6.0` |
 
-   ```bash
-   cd worker
-   npx wrangler d1 create cf-tunnel-control-plane
-   npx wrangler kv namespace create SUB_CACHE
-   ```
+The Worker/D1 resource names remain `cf-tunnel-control-plane` to preserve the existing deployment URL and database binding. The project and repository name is `cf-tunnel-subscription-manager`.
 
-2. Update `worker/wrangler.toml` with the D1 and KV IDs.
+## Deployment Order
 
-3. Set secrets:
+1. Deploy or update the Worker and D1 database.
+2. Verify Worker login, public metrics, proxy-node editing, import refresh, and subscription preview.
+3. Publish or select the agent image tag.
+4. Deploy the Swarm stack with the versioned agent image.
+5. Verify agent registration, heartbeat, quick tunnel URL capture, restart commands, and subscription output.
+6. Migrate any critical data from the old Worker if this is a replacement deployment.
+7. Switch traffic or DNS only after the new deployment is stable.
+8. Remove the old Worker and temporary validation data only after the cutover is complete.
 
-   ```bash
-   cd worker
-   npx wrangler secret put ADMIN_TOKEN
-   npx wrangler secret put AGENT_TOKEN
-   npx wrangler secret put SUBSCRIPTION_TOKEN
-   ```
+## Worker Deployment
 
-   `SUBSCRIPTION_TOKEN` is the initial subscription token. After deployment, the admin UI can rotate it and store the active token in D1.
+Install dependencies from `worker/`:
 
-4. Apply migrations and deploy:
+```bash
+cd worker
+npm ci
+```
 
-   ```bash
-   cd worker
-   npx wrangler d1 migrations apply cf-tunnel-control-plane --remote
-   npx wrangler deploy
-   ```
+Create D1 once per environment:
 
-   Or run the helper on `ssh hd01` after `worker/wrangler.toml` contains the real D1 database ID:
+```bash
+npx wrangler d1 create cf-tunnel-control-plane
+```
 
-   ```bash
-   CLOUDFLARE_API_TOKEN=... \
-   CLOUDFLARE_ACCOUNT_ID=... \
-   ADMIN_TOKEN=... \
-   AGENT_TOKEN=... \
-   SUBSCRIPTION_TOKEN=... \
-   ./scripts/deploy-worker.sh
-   ```
+Update [worker/wrangler.toml](../worker/wrangler.toml) with the returned D1 `database_id`.
 
-   The token must include D1 database access, Workers script deploy access, and Worker secret edit access. A token that can only identify the account is not enough.
+Set Worker secrets:
 
-## Cutover Order
+```bash
+npx wrangler secret put ADMIN_TOKEN
+npx wrangler secret put AGENT_TOKEN
+npx wrangler secret put SUBSCRIPTION_TOKEN
+```
 
-When replacing an existing deployment, keep the old Worker and its data in place until the new deployment is verified and the critical data has been migrated.
+Secret meanings:
 
-Recommended order:
+| Secret | Required | Used by | Meaning |
+| --- | --- | --- | --- |
+| `ADMIN_TOKEN` | yes | Browser/admin API | Bearer token for management UI and admin endpoints. |
+| `AGENT_TOKEN` | yes | Agent containers | Bearer token used by agents to register, heartbeat, post events, poll commands, and acknowledge commands. |
+| `SUBSCRIPTION_TOKEN` | yes | Subscription clients | Initial token embedded in `/sub/.../:token` URLs. The admin UI can rotate and persist the active token in D1. |
 
-1. Deploy the new Worker with the same public URL or a separate staging URL.
-2. Verify login, public metrics, proxy-node editing, import refresh, and subscription preview.
-3. Migrate any production data that must be preserved from the old deployment.
-4. Switch the traffic or DNS target only after the new deployment is stable.
-5. Retire the old Worker and any temporary validation data after the cutover is complete.
+Apply migrations and deploy:
+
+```bash
+npx wrangler d1 migrations apply cf-tunnel-control-plane --remote
+npx wrangler deploy
+```
+
+The helper script runs dependency install, typecheck, tests, remote D1 migrations, Worker secret upload, and deploy:
+
+```bash
+CLOUDFLARE_API_TOKEN=... \
+CLOUDFLARE_ACCOUNT_ID=... \
+ADMIN_TOKEN=... \
+AGENT_TOKEN=... \
+SUBSCRIPTION_TOKEN=... \
+./scripts/deploy-worker.sh
+```
+
+`CLOUDFLARE_API_TOKEN` must be able to manage D1, deploy Workers, and edit Worker secrets. A token that can only identify the account is not enough.
 
 ## Agent Image
 
-Build on `ssh hd01`:
+The default production image is:
 
-```bash
-cd /path/to/cf-tunnel-subscription-manager/agent
-docker build \
-  --build-arg CLOUDFLARED_VERSION=2026.6.0 \
-  -t cf-tunnel-agent:test .
+```text
+ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1
 ```
 
-For a single-node or node-constrained Swarm deployment, preloading `cf-tunnel-agent:test` on the target node is enough. For multi-node Swarm, push the image to a registry and set `AGENT_IMAGE` in the stack environment, for example:
+The image is built from [agent/Dockerfile](../agent/Dockerfile), includes the Go tunnel agent and pinned `cloudflared 2026.6.0`, and does not download `cloudflared` at runtime.
+
+For local testing on a single node:
 
 ```bash
-docker tag cf-tunnel-agent:test ghcr.io/<owner>/<repo>/cf-tunnel-agent:0.1.0
-docker push ghcr.io/<owner>/<repo>/cf-tunnel-agent:0.1.0
+cd agent
+docker build --build-arg CLOUDFLARED_VERSION=2026.6.0 -t cf-tunnel-agent:test .
 ```
 
-The attempted GHCR push from `hd01` failed because the available GitHub token lacked package write scope. Use a token with `write:packages` or another registry credential.
+For production Swarm, use the published GHCR image or publish your own registry image. Multi-node Swarm deployments must use an image that every target node can pull.
 
-## Docker Swarm
+## Docker Swarm Deployment
 
-Use `deploy/.env.template` as a template and provide runtime values outside Git.
+Copy [deploy/.env.template](../deploy/.env.template) to a private env file and fill in the values:
 
 ```bash
-docker stack deploy -c deploy/docker-stack.example.yml edge
+cp deploy/.env.template .env.production
 ```
 
-The agent health endpoint is `127.0.0.1:1984/health` inside the container.
+Deploy:
 
-`EDGE_IP_VERSION=auto` is the recommended default for Docker Swarm overlay networks. IPv6-only mode (`6`) can fail inside overlay containers when the host has IPv6 but the container network does not.
+```bash
+set -a
+. ./.env.production
+set +a
+docker stack deploy --with-registry-auth -c deploy/docker-stack.example.yml "${STACK_NAME}"
+```
+
+The stack template expects the external Docker networks `aa_host_bridge` and `cf-net` to already exist. Create or rename networks to match your environment before deploying.
+
+The agent health endpoint is `http://127.0.0.1:1984/health` inside the container. Quick tunnel mappings are also written to the mounted volume at `/temp-tunnel/tunnels.list`.
+
+## Stack Configuration Reference
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `DOMAIN` | no | `example.com` in template | Operator-owned domain marker. The current stack template does not use it directly, but it is kept for environment consistency with existing stacks. |
+| `DEPLOY_NODE` | yes | none | Docker Swarm node hostname where the agent service must run. Used by the placement constraint and as `SWARM_NODE_NAME`. |
+| `STACK_NAME` | yes | `edge` in examples | Swarm stack name and agent metadata value. |
+| `AGENT_IMAGE` | yes | `ghcr.io/loongel/cf-tunnel-subscription-manager-agent:v0.1.1` | Agent container image. Pin a version tag for production. |
+| `TUNNEL_TOKEN` | no | empty | Cloudflare fixed tunnel token. Leave empty to run only quick tunnels. |
+| `QUICK_TUNNELS` | no if `TUNNEL_TOKEN` is set | empty | Space- or comma-separated quick tunnel targets, for example `http://s1:2095 http://s2:2096`. Each target starts an independent TryCloudflare tunnel. |
+| `EDGE_IP_VERSION` | no | `auto` in template | Passed to `cloudflared --edge-ip-version`. Use `auto` for Swarm overlay networks unless container IPv6 is verified. Valid values are `auto`, `4`, and `6`. |
+| `WORKER_BASE_URL` | yes | none | Base URL of the Worker control plane, without trailing slash. |
+| `AGENT_TOKEN` | yes | none | Must match the Worker `AGENT_TOKEN` secret. |
+| `FIXED_METRICS_PORT_BASE` | no | `2000` | Metrics port for the fixed tunnel process. |
+| `QUICK_METRICS_PORT_BASE` | no | `2100` | Base metrics port for quick tunnels. The first quick tunnel uses base plus one. |
+| `HEARTBEAT_INTERVAL` | no | `30s` | How often the agent posts status to the Worker. Accepts Go duration strings or seconds. |
+| `COMMAND_POLL_INTERVAL` | no | `20s` | How often the agent polls the Worker for restart/status commands. Accepts Go duration strings or seconds. |
+| `RESTART_COOLDOWN_SECONDS` | no | `610` | Minimum cooldown before a quick tunnel restarts after failure, used to avoid TryCloudflare rate limiting. Accepts Go duration strings or seconds. |
+| `QUICK_START_SPACING` | no | `20s` | Delay between starting quick tunnel processes. Reduces startup bursts and rate-limit risk. |
+
+## Worker Runtime Configuration
+
+| Binding or variable | Required | Meaning |
+| --- | --- | --- |
+| `DB` | yes | D1 binding storing agents, tunnels, events, proxy nodes, endpoints, groups, settings, import sources, and commands. |
+| `PUBLIC_BASE_URL` | no | Absolute public base URL used when generating subscription links in the admin UI. Empty means the browser origin is used. |
+| `SUBCONVERTER_URL` | no | Reserved extension point for a future external converter. The first release keeps conversion local. |
+
+## Post-Deploy Verification
+
+Run the remote build and API smoke from the repository root:
+
+```bash
+SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/remote-build-hd01.sh
+
+WORKER_BASE_URL=https://cf-tunnel-control-plane.officesline.workers.dev \
+ADMIN_TOKEN=... \
+AGENT_TOKEN=... \
+./scripts/worker-smoke.sh
+```
+
+Manual checks:
+
+1. Open `/admin` without a token and confirm public metric cards load.
+2. Log in with `ADMIN_TOKEN`.
+3. Confirm tunnels, proxy nodes, endpoints, groups, and subscription links load.
+4. Confirm the Swarm agent appears online and reports a quick tunnel public URL.
+5. Queue a quick tunnel restart from the UI and confirm the agent acknowledges it.
+6. Import a subscription source and confirm refresh does not clear previous successful data after a failed fetch.
+7. Confirm `/sub/v2ray/:token`, `/sub/passwall2/:token`, and `/sub/sing-box/:token` return non-empty outputs for configured nodes.
+
+## Data Migration Notes
+
+For a Worker replacement, migrate D1 data before switching traffic. Critical tables normally include agents, tunnels, proxy nodes, preferred endpoints, custom SNI values, import sources, groups, settings, and selection tables.
+
+Do not delete the old Worker or old D1 database until:
+
+- The new Worker admin UI is reachable.
+- The new agent image is deployed and agents are online.
+- Subscription URLs return expected nodes.
+- Important node-specific endpoint bindings and group memberships have been checked.
+- At least one scheduled cron cycle has completed without unexpected restart commands.
