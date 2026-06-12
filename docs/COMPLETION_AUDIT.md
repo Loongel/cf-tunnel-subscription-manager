@@ -34,6 +34,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Submit to GitHub | GitHub remote is configured and pushed. | Complete |
 | Project naming and release artifacts | Display name is `Cloudflare Tunnel Subscription Manager`; repository slug is `cf-tunnel-subscription-manager`; agent image is documented as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`. | Complete |
 | Local deployment secret management | `.secrets/worker.env` and `.secrets/swarm.env` are documented, ignored by Git, excluded from remote build sync, and consumed by deployment scripts. | Complete |
+| D1 backup before migrations | `scripts/backup-d1.sh` exports remote D1 active business data into `.secrets/d1-backups/`; `scripts/deploy-worker.sh` runs it before remote migrations. Clean replacement import steps are documented in `docs/DEPLOYMENT.md`. | Complete |
 
 ## Completed Verification
 
@@ -60,6 +61,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns
+- Remote D1 backup created under `.secrets/d1-backups/` before the next migration/deployment cycle.
 
 ## Remaining Production Operation
 

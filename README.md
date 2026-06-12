@@ -13,7 +13,7 @@ The project has two deployable parts:
 - Worker deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
 - Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`
 - Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
-- Latest verified Worker version: `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
+- Latest verified Worker version: `8fd4ef4f-ef9f-4592-8252-0916256016e5`
 - Pinned `cloudflared` version in the agent image: `2026.6.0`
 
 Use a versioned agent image tag in production. `latest` is published for convenience, but production Swarm stacks should pin a release tag.
@@ -38,7 +38,7 @@ docker run --rm --entrypoint cloudflared ghcr.io/loongel/cf-tunnel-subscription-
    ```
 
 3. Fill `.secrets/worker.env` for Worker deployment and `.secrets/swarm.env` for Docker Swarm deployment. The `.secrets/` directory is ignored by Git.
-4. Deploy the Worker:
+4. Deploy the Worker. The deploy helper backs up the remote D1 database before applying migrations:
 
    ```bash
    ./scripts/deploy-worker.sh

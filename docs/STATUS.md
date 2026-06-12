@@ -37,6 +37,7 @@ Production Worker resource name remains `cf-tunnel-control-plane` to preserve th
   - Remote build script for `ssh hd01`.
   - Worker deploy helper using runtime environment variables for secrets.
   - Repository-local `.secrets/worker.env` and `.secrets/swarm.env` workflow for repeatable local deployment without committing secrets.
+  - Remote D1 backup helper and deploy-time pre-migration backup workflow under `.secrets/d1-backups/`.
 
 ## Verified
 
@@ -75,6 +76,7 @@ Additional checks:
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan found no committed Cloudflare API token, tunnel token, or subscription/admin token.
+- Remote D1 backup created locally under `.secrets/d1-backups/` before the next deployment/migration cycle.
 
 ## Runtime Secrets
 
@@ -88,6 +90,7 @@ The file is not in the repository and contains `ADMIN_TOKEN`, `AGENT_TOKEN`, and
 
 - Deploy the production Swarm stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.
 - Keep the old Worker and D1 data until the new deployment is verified and critical data has been migrated.
+- Before deployment or schema migration, export the current D1. For a clean replacement D1, run the current migration chain first and import only the final active business tables.
 - Evaluate a low-request state channel for agent/tunnel liveness:
   - Goal: reduce Worker request volume by moving frequent agent liveness writes and tunnel probes out of Worker request endpoints.
   - Preferred shape: agent probes tunnels locally and writes compact lease/status records to an external low-cost state channel such as Redis/Valkey/Upstash with TTL; Worker reads that state on demand for admin UI/subscription generation and uses low-frequency cron only as a fallback.

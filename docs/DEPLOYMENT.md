@@ -53,14 +53,15 @@ The Worker/D1 resource names remain `cf-tunnel-control-plane` to preserve the ex
 
 ## Deployment Order
 
-1. Deploy or update the Worker and D1 database.
-2. Verify Worker login, public metrics, proxy-node editing, import refresh, and subscription preview.
-3. Publish or select the agent image tag.
-4. Deploy the Swarm stack with the versioned agent image.
-5. Verify agent registration, heartbeat, quick tunnel URL capture, restart commands, and subscription output.
-6. Migrate any critical data from the old Worker if this is a replacement deployment.
-7. Switch traffic or DNS only after the new deployment is stable.
-8. Remove the old Worker and temporary validation data only after the cutover is complete.
+1. Back up the current remote D1 database.
+2. Deploy or update the Worker and D1 database.
+3. Verify Worker login, public metrics, proxy-node editing, import refresh, and subscription preview.
+4. Publish or select the agent image tag.
+5. Deploy the Swarm stack with the versioned agent image.
+6. Verify agent registration, heartbeat, quick tunnel URL capture, restart commands, and subscription output.
+7. Migrate any critical data from the old Worker if this is a replacement deployment.
+8. Switch traffic or DNS only after the new deployment is stable.
+9. Remove the old Worker and temporary validation data only after the cutover is complete.
 
 ## Worker Deployment
 
@@ -95,6 +96,14 @@ Secret meanings:
 | `AGENT_TOKEN` | yes | Agent containers | Bearer token used by agents to register, heartbeat, post events, poll commands, and acknowledge commands. |
 | `SUBSCRIPTION_TOKEN` | yes | Subscription clients | Initial token embedded in `/sub/.../:token` URLs. The admin UI can rotate and persist the active token in D1. |
 
+Back up the current remote D1 active business data before applying migrations:
+
+```bash
+D1_EXPORT_MODE=data D1_EXPORT_TABLES=active ./scripts/backup-d1.sh
+```
+
+Backups are written under `.secrets/d1-backups/*.sql`. The directory is ignored by Git and may contain operational data or tokens stored in D1, so treat the files as secrets.
+
 Apply migrations and deploy:
 
 ```bash
@@ -102,7 +111,7 @@ npx wrangler d1 migrations apply cf-tunnel-control-plane --remote
 npx wrangler deploy
 ```
 
-The helper script reads `.secrets/worker.env` by default, then runs dependency install, typecheck, tests, remote D1 migrations, Worker secret upload, and deploy:
+The helper script reads `.secrets/worker.env` by default, then runs dependency install, typecheck, tests, a remote active-table D1 data backup, remote D1 migrations, Worker secret upload, and deploy:
 
 ```bash
 ./scripts/deploy-worker.sh
@@ -238,6 +247,52 @@ Manual checks:
 ## Data Migration Notes
 
 For a Worker replacement, migrate D1 data before switching traffic. Critical tables normally include agents, tunnels, proxy nodes, preferred endpoints, custom SNI values, import sources, groups, settings, and selection tables.
+
+There are two different export types:
+
+- **Active-table data backup**: current business data only. Use it before deployment and before schema migration. This is the default project backup path because the target environment should be created by the current migration chain, not by importing old schema.
+- **Full backup**: schema plus data. Use it manually when you need a raw D1 rollback artifact for forensic recovery.
+
+The deploy helper always creates an active-table data backup first:
+
+```bash
+./scripts/deploy-worker.sh
+```
+
+Manual active-table data backup:
+
+```bash
+D1_EXPORT_MODE=data D1_EXPORT_TABLES=active ./scripts/backup-d1.sh
+```
+
+Manual full backup:
+
+```bash
+./scripts/backup-d1.sh
+```
+
+Clean D1 replacement flow:
+
+1. Export the current remote D1 with the active-table data backup command above.
+2. Create the new D1 database with `npx wrangler d1 create <new-db-name>`.
+3. Update [worker/wrangler.toml](../worker/wrangler.toml) to point at the new D1 `database_id`.
+4. Apply the full current migration chain to the new D1:
+
+   ```bash
+   cd worker
+   npx wrangler d1 migrations apply <new-db-name> --remote
+   ```
+
+5. Import the data-only SQL into the migrated clean D1:
+
+   ```bash
+   cd worker
+   npx wrangler d1 execute <new-db-name> --remote --file ../.secrets/d1-backups/<data-export>.sql
+   ```
+
+6. Deploy the Worker against the new D1 and run the post-deploy checks before removing the old Worker or old D1 database.
+
+Do not import deprecated tables or columns into a clean replacement database. The current migration chain may still contain early migrations that create legacy structures before later migrations remove them; the final runtime schema is authoritative.
 
 Do not delete the old Worker or old D1 database until:
 

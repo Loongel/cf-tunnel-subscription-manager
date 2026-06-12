@@ -26,6 +26,9 @@ echo "== typecheck and tests =="
 npm run check
 npm test
 
+echo "== backing up remote D1 active data before migrations =="
+D1_EXPORT_MODE=data D1_EXPORT_TABLES=active "${ROOT_DIR}/scripts/backup-d1.sh"
+
 echo "== applying D1 migrations =="
 npm run d1:migrate:remote
 
