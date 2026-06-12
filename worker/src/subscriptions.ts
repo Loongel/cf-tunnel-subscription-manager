@@ -434,7 +434,7 @@ const DISCOVERY_FETCH_INIT: RequestInit = {
     "user-agent": "curl/8.5.0"
   }
 };
-const DISCOVERY_SRV_PREFIXES = ["_vless", "_vmess", "_trojan", "_ss", "_shadowsocks", "_frps"];
+const DISCOVERY_SRV_PREFIXES = ["_vless", "_vmess", "_trojan", "_ss", "_shadowsocks", "_hysteria2", "_hy2", "_frps"];
 
 function discoveryFetchInit(env: Env, init: RequestInit = {}): RequestInit {
   const headers = new Headers(DISCOVERY_FETCH_INIT.headers);

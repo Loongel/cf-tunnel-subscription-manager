@@ -170,6 +170,45 @@ describe("protocol adapter", () => {
     expect(result.uri).toContain("host%3Dabc.trycloudflare.com");
   });
 
+  it("mutates Hysteria2 share links for endpoint and SNI derived nodes", () => {
+    const raw = "hysteria2://secret@example.com:8443?sni=origin.example.com&insecure=1#old";
+    const result = mutateShareUri(raw, {
+      node: { ...node(raw), protocol: "hysteria2" },
+      tunnelHost: "abc.trycloudflare.com",
+      endpoint: { ...endpoint, value: "162.159.1.1:443", label: "CF IP A" },
+      format: "passwall2"
+    });
+    expect(result.skipped).toBeFalsy();
+    const parsed = new URL(result.uri || "");
+    expect(parsed.protocol).toBe("hysteria2:");
+    expect(parsed.hostname).toBe("162.159.1.1");
+    expect(parsed.port).toBe("443");
+    expect(parsed.searchParams.get("sni")).toBe("abc.trycloudflare.com");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("s1-vless | CF IP A");
+  });
+
+  it("converts Hysteria2 share links to sing-box outbounds", () => {
+    const raw = "hy2://secret@example.com:8443?sni=origin.example.com&insecure=1#old";
+    const result = toSingBoxOutbound(raw, {
+      node: { ...node(raw), protocol: "hysteria2" },
+      endpoint: { ...endpoint, value: "162.159.1.1:443", label: "CF IP A" },
+      format: "sing-box"
+    });
+    expect(result.skipped).toBeFalsy();
+    expect(result.outbound).toMatchObject({
+      type: "hysteria2",
+      tag: "s1-vless | CF IP A",
+      server: "162.159.1.1",
+      server_port: 443,
+      password: "secret",
+      tls: {
+        enabled: true,
+        server_name: "origin.example.com",
+        insecure: true
+      }
+    });
+  });
+
   it("builds subscription URLs with encoded token", () => {
     const urls = subscriptionUrls("https://worker.example.com", "sub_token/with+chars");
     expect(urls.v2ray).toBe("https://worker.example.com/sub/v2ray/sub_token%2Fwith%2Bchars");
@@ -188,23 +227,34 @@ describe("protocol adapter", () => {
   it("imports base64 encoded share-link subscriptions", () => {
     const body = encodeBase64([
       "vless://uuid@example.com:443?type=ws&security=tls#alpha",
-      "trojan://pass@example.net:443#beta"
+      "trojan://pass@example.net:443#beta",
+      "hysteria2://secret@example.org:8443?sni=edge.example.org#gamma"
     ].join("\n"));
     const parsed = parseProxySubscriptionContent(body, "remote");
-    expect(parsed).toHaveLength(2);
+    expect(parsed).toHaveLength(3);
     expect(parsed[0]).toMatchObject({ name: "alpha", sourceType: "v2ray_uri", protocol: "vless" });
     expect(parsed[1]).toMatchObject({ name: "beta", sourceType: "v2ray_uri", protocol: "trojan" });
+    expect(parsed[2]).toMatchObject({
+      name: "gamma",
+      sourceType: "v2ray_uri",
+      protocol: "hysteria2",
+      server: "example.org",
+      port: "8443",
+      sni: "edge.example.org"
+    });
   });
 
   it("imports sing-box proxy outbounds and skips selector outbounds", () => {
     const parsed = parseProxySubscriptionContent(JSON.stringify({
       outbounds: [
         { type: "selector", tag: "auto", outbounds: ["a"] },
-        { type: "vless", tag: "edge-a", server: "example.com", server_port: 443, uuid: "uuid" }
+        { type: "vless", tag: "edge-a", server: "example.com", server_port: 443, uuid: "uuid" },
+        { type: "hysteria2", tag: "hy2-a", server: "hy.example.com", server_port: 8443, password: "secret" }
       ]
     }));
-    expect(parsed).toHaveLength(1);
+    expect(parsed).toHaveLength(2);
     expect(parsed[0]).toMatchObject({ name: "edge-a", sourceType: "sing_box_outbound", protocol: "sing-box" });
+    expect(parsed[1]).toMatchObject({ name: "hy2-a", sourceType: "sing_box_outbound", protocol: "sing-box", server: "hy.example.com", port: "8443" });
   });
 
   it("composes HTTP content nodes under a TLS carrier before import", () => {

@@ -13,8 +13,8 @@ export interface ParsedProxyNode {
   tls: boolean;
 }
 
-const SHARE_LINK_RE = /^(vless|vmess|trojan|ss):\/\//i;
-const PROXY_OUTBOUND_TYPES = new Set(["vless", "vmess", "trojan", "shadowsocks", "ss"]);
+const SHARE_LINK_RE = /^(vless|vmess|trojan|ss|hysteria2|hy2):\/\//i;
+const PROXY_OUTBOUND_TYPES = new Set(["vless", "vmess", "trojan", "shadowsocks", "ss", "hysteria2", "hy2"]);
 
 export function parseEndpointValues(input: unknown): string[] {
   const values = Array.isArray(input) ? input : typeof input === "string" ? [input] : [];
@@ -83,7 +83,7 @@ function extractShareLinks(content: string): string[] {
     .filter((line) => SHARE_LINK_RE.test(line));
   if (byLine.length > 0) return byLine;
 
-  const matches = content.match(/(?:vless|vmess|trojan|ss):\/\/[^\s"'<>]+/gi);
+  const matches = content.match(/(?:vless|vmess|trojan|ss|hysteria2|hy2):\/\/[^\s"'<>]+/gi);
   return matches || [];
 }
 

@@ -67,7 +67,8 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Code audit cleanup passed on 2026-06-12: import refresh now preserves global endpoint exclusions; Group member selection survives filtering/re-rendering; subscription copy chips are visually distinct from selectable chips; Proxy Nodes expose explicit Edit/Bind actions; old tunnel-id binding compatibility and redundant endpoint defaults were removed.
 - D1 cleanup migration `0012_remove_legacy_binding_fields.sql` was applied remotely; remote schema no longer has `group_members`, `proxy_node_tunnel_selections`, `proxy_nodes.use_tunnel`, `proxy_nodes.selected_tunnel_id`, or `preferred_endpoints.default_selected`.
 - Discovery URL preferred endpoints were added and deployed on 2026-06-12; online validation created temporary discovery endpoints, generated `frps.n.gebi.party:42998` from `https://frps.s.gebi.party` using the configured access header, generated `n.gebi.party:42565` from `https://hm-vless.s.gebi.party`, then removed the temporary endpoints.
-- Worker deployed version `6d6665b0-007f-419a-a680-2087391e3ae7`
+- Hysteria2 support was added on 2026-06-13: `hysteria2://` and `hy2://` paste imports are recognized, V2Ray/PassWall2 output preserves Hysteria2 share links, and sing-box output converts them to `type: "hysteria2"` outbounds.
+- Worker deployed version `18a7b937-ef30-4735-b45c-d81db526120c`
 - Public agent image `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` was published by GitHub Actions, anonymously pulled, and verified to report `cloudflared version 2026.6.0`
 - Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`

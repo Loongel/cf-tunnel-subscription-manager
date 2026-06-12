@@ -10,12 +10,14 @@ The built-in adapter supports the CDN-friendly subset needed by the first releas
 - `vmess://`
 - `trojan://`
 - `ss://`
+- `hysteria2://` / `hy2://`
 - sing-box outbound JSON
 
 For tunnel-backed nodes it updates:
 
 - client server/address to the selected preferred endpoint or tunnel hostname
 - TLS SNI / server name to the current tunnel hostname
+- Hysteria2 `sni` to the current tunnel hostname
 - WebSocket HTTP Host to the current tunnel hostname
 - node display name with endpoint suffixes
 

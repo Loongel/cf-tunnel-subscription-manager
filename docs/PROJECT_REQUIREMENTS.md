@@ -362,7 +362,7 @@ http://s2:2096 https://another.trycloudflare.com
 | `remark` | 备注。 |
 | `source_type` | `v2ray_uri/sing_box_outbound/json/raw`。 |
 | `raw_config` | 原始节点信息。 |
-| `protocol` | `vless/vmess/trojan/shadowsocks/http/unknown`。 |
+| `protocol` | `vless/vmess/trojan/shadowsocks/hysteria2/http/unknown`。 |
 | `enabled` | 是否启用。 |
 | `import_key/import_source_name/raw_config_hash` | 导入身份和来源元数据。 |
 | `created_at/updated_at` | 审计时间。 |
@@ -536,7 +536,8 @@ s1-vless | cf-a.example.com | host=abc.trycloudflare.com
 2. `vmess://...`
 3. `trojan://...`
 4. `ss://...` / Shadowsocks
-5. sing-box outbound JSON
+5. `hysteria2://...` / `hy2://...`
+6. sing-box outbound JSON
 
 第一版优先支持这些传输形态：
 
@@ -561,7 +562,7 @@ PassWall2 第一版按 Xray/PassWall2 常见订阅导入方式处理：
 
 - 提供 `/sub/passwall2/:token` 独立入口。
 - 输出 base64 编码的分享 URI 列表。
-- 默认包含 `vless/vmess/trojan/shadowsocks`，并优先使用 WebSocket/TLS/HTTP Host/SNI 字段组合。
+- 默认包含 `vless/vmess/trojan/shadowsocks/hysteria2`，并优先使用 WebSocket/TLS/HTTP Host/SNI 字段组合；Hysteria2 使用 `sni` 字段做流量派生。
 - 对 sing-box 专属 JSON 字段不输出到 PassWall2 订阅。
 - 订阅预览页要能显示“PassWall2 输出节点数”和“被跳过节点数/原因”。
 
@@ -834,7 +835,7 @@ cloudflared:
 
 - V2Ray / PassWall2 URI 输出。
 - sing-box outbound 生成。
-- Shadowsocks / VMess / VLESS / Trojan CDN 友好子集验证。
+- Shadowsocks / VMess / VLESS / Trojan / Hysteria2 子集验证。
 - 全局和节点级优选 IP/域名派生。
 - 分组过滤。
 
@@ -850,7 +851,7 @@ cloudflared:
 
 ### 13.1 已确认决策
 
-1. 第一版代理协议覆盖 CDN 友好的主流协议：VLESS、VMess、Trojan、Shadowsocks，并支持 sing-box outbound JSON。
+1. 第一版代理协议覆盖 CDN 友好的主流协议：VLESS、VMess、Trojan、Shadowsocks、Hysteria2，并支持 sing-box outbound JSON。
 2. V2Ray 订阅使用 base64 编码的多行分享链接作为默认格式。
 3. 必须支持 PassWall2，提供独立 `/sub/passwall2/:token` 订阅入口。
 4. 订阅转换不从零手搓，优先调研并复用成熟开源项目；必要时保留外部 converter 后端。

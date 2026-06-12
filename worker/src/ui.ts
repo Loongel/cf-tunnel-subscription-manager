@@ -314,7 +314,7 @@ export function renderAdminUi(env: Env): string {
               <label>Remark<input id="sourceRemark" placeholder="optional"></label>
               <label>Enabled<select id="sourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
               <div class="actions"><button id="saveNodeSource" class="primary">Add Source</button></div>
-              <label class="full">Raw Config<textarea id="sourceRaw" placeholder="vless://, vmess://, trojan://, ss:// or sing-box outbound JSON"></textarea></label>
+              <label class="full">Raw Config<textarea id="sourceRaw" placeholder="vless://, vmess://, trojan://, ss://, hysteria2:// or sing-box outbound JSON"></textarea></label>
             </div>
           </div>
         </div>
@@ -368,7 +368,7 @@ export function renderAdminUi(env: Env): string {
             <label>Name<input id="importSourceName" placeholder="airport-a"></label>
             <label>Type<select id="importSourceKind"><option value="url">URL</option><option value="content">Pasted Content</option></select></label>
             <label class="wide">Subscription URLs<textarea id="importSourceUrl" placeholder="https://example.com/sub-a.txt&#10;https://example.com/sub-b.txt"></textarea></label>
-            <label class="wide">Paste Content<textarea id="importSourceContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
+            <label class="wide">Paste Content<textarea id="importSourceContent" placeholder="base64 subscription, share links including hysteria2://, or sing-box JSON"></textarea></label>
             <label>Name Prefix<input id="importPrefix" placeholder="optional"></label>
             <label>Enabled<select id="importSourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
             <label>Exclude Keywords<input id="importExcludeKeywords" placeholder="expire, test"></label>
@@ -383,7 +383,7 @@ export function renderAdminUi(env: Env): string {
           <div class="toolbar"><h2>Import Review</h2><div class="actions"><button id="previewImport" class="primary">Preview Source</button><button id="commitImport">Commit Selected</button><button id="saveImportRules">Save Rules</button></div></div>
           <div class="formgrid">
             <label class="wide">Ad-hoc Subscription URL<textarea id="importUrls" placeholder="https://example.com/sub.txt"></textarea></label>
-            <label class="wide">Ad-hoc Paste Content<textarea id="importContent" placeholder="base64 subscription, share links, or sing-box JSON"></textarea></label>
+            <label class="wide">Ad-hoc Paste Content<textarea id="importContent" placeholder="base64 subscription, share links including hysteria2://, or sing-box JSON"></textarea></label>
             <label class="wide">Keyword Filter<input id="importFilterText" placeholder="hk, test, expire"></label>
             <label>Filter Mode<select id="importFilterMode"><option value="exclude">Move matching to unused</option><option value="include">Keep only matching</option></select></label>
             <div class="actions"><button id="applyImportFilter" class="subtle">Apply Filter</button><button id="clearImportReview" class="subtle">Clear Preview</button></div>

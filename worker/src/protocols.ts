@@ -15,6 +15,7 @@ export function inferProtocol(raw: string, sourceType?: string): string {
   if (/^vmess:\/\//i.test(trimmed)) return "vmess";
   if (/^trojan:\/\//i.test(trimmed)) return "trojan";
   if (/^ss:\/\//i.test(trimmed)) return "shadowsocks";
+  if (/^(hysteria2|hy2):\/\//i.test(trimmed)) return "hysteria2";
   try {
     const parsed = JSON.parse(trimmed) as JsonRecord;
     if (typeof parsed.type === "string") return parsed.type;
@@ -176,6 +177,21 @@ function mutateUrlUri(raw: string, ctx: MutationContext): string {
   return url.toString();
 }
 
+function mutateHysteria2Uri(raw: string, ctx: MutationContext): string {
+  const url = new URL(raw);
+  const server = targetServer(ctx);
+  const host = pickHostForContext(urlHostCandidates(url), ctx);
+  if (server) {
+    url.hostname = urlHostname(server);
+    url.port = targetPort(url.port, ctx);
+  }
+  url.hash = `#${encodeURIComponent(displayName(ctx))}`;
+  if (host) {
+    url.searchParams.set("sni", host);
+  }
+  return url.toString();
+}
+
 function mutateVmess(raw: string, ctx: MutationContext): string {
   const encoded = raw.replace(/^vmess:\/\//i, "");
   const parsed = JSON.parse(decodeBase64(encoded)) as JsonRecord;
@@ -282,6 +298,9 @@ export function mutateShareUri(raw: string, ctx: MutationContext): GeneratedNode
   try {
     if (protocol === "vless" || protocol === "trojan") {
       return { ...base, uri: mutateUrlUri(raw, ctx) };
+    }
+    if (protocol === "hysteria2") {
+      return { ...base, uri: mutateHysteria2Uri(raw, ctx) };
     }
     if (protocol === "vmess") {
       return { ...base, uri: mutateVmess(raw, ctx) };
@@ -421,6 +440,25 @@ export function toSingBoxOutbound(raw: string, ctx: MutationContext): GeneratedN
           method: details.method,
           password: details.password
         }
+      };
+    }
+    if (protocol === "hysteria2") {
+      const url = new URL(raw);
+      const host = pickHostForContext(urlHostCandidates(url), ctx) || server;
+      return {
+        ...base,
+        outbound: {
+          type: "hysteria2",
+          tag,
+          server,
+          server_port: Number(targetPort(url.port, ctx)),
+          password: decodeURIComponent(url.username),
+          tls: {
+            enabled: true,
+            server_name: host,
+            insecure: url.searchParams.get("insecure") === "1" || url.searchParams.get("insecure") === "true"
+          }
+        } as JsonRecord
       };
     }
     return { ...base, skipped: true, reason: `unsupported protocol: ${protocol}` };
