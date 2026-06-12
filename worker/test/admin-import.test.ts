@@ -241,7 +241,7 @@ describe("admin import refresh", () => {
     expect(tables.nodes.map((row) => row.name).sort()).toEqual(["a direct-out@usr", "b direct-out@usr"]);
   });
 
-  it("keeps import identity stable for volatile reality params and requester IP substitutions", async () => {
+  it("keeps import identity stable for volatile reality params", async () => {
     const tables: TableMap = { nodes: [], endpoints: [], endpointSelections: [] };
 
     const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
@@ -253,7 +253,7 @@ describe("admin import refresh", () => {
           sourceGroup: "usually@3xui.hk",
           sourceType: "v2ray_uri",
           name: "reality-node",
-          rawConfig: "vless://00000000-0000-4000-8000-000000000001@162.158.193.44:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=aaa&spx=bbb#reality-node",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000001@origin.example:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=aaa&spx=bbb#reality-node",
           protocol: "vless"
         },
         {
@@ -262,7 +262,7 @@ describe("admin import refresh", () => {
           sourceGroup: "usually@3xui.hk",
           sourceType: "v2ray_uri",
           name: "reality-node",
-          rawConfig: "vless://00000000-0000-4000-8000-000000000001@172.68.211.216:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=ccc&spx=ddd#reality-node",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000001@origin.example:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=ccc&spx=ddd#reality-node",
           protocol: "vless"
         }
       ]

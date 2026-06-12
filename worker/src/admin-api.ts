@@ -635,7 +635,6 @@ function normalizeRawConfigForIdentity(rawConfig: string, sourceType: string): s
 function normalizeShareUriIdentityConfig(rawConfig: string): string {
   try {
     const url = new URL(rawConfig);
-    normalizeIdentityHost(url);
     for (const key of VOLATILE_IDENTITY_QUERY_KEYS) {
       url.searchParams.delete(key);
     }
@@ -649,9 +648,6 @@ function normalizeShareUriIdentityConfig(rawConfig: string): string {
 function normalizeVmessIdentityConfig(rawConfig: string): string {
   try {
     const parsed = JSON.parse(decodeBase64(rawConfig.replace(/^vmess:\/\//i, ""))) as JsonRecord;
-    if (typeof parsed.add === "string" && shouldNormalizeRequesterIp(parsed.add)) {
-      parsed.add = "127.0.0.1";
-    }
     for (const key of VOLATILE_IDENTITY_RECORD_KEYS) delete parsed[key];
     return `vmess:${stableJsonStringify(parsed)}`;
   } catch {
@@ -676,69 +672,12 @@ function normalizeSingBoxIdentityRecord(value: JsonValue): void {
   }
   if (!value || typeof value !== "object") return;
   const record = value as JsonRecord;
-  if (typeof record.server === "string" && shouldNormalizeRequesterIp(record.server)) {
-    record.server = "127.0.0.1";
-  }
   for (const key of VOLATILE_IDENTITY_RECORD_KEYS) delete record[key];
   for (const child of Object.values(record)) normalizeSingBoxIdentityRecord(child);
 }
 
-function normalizeIdentityHost(url: URL): void {
-  if (shouldNormalizeRequesterIp(url.hostname)) {
-    url.hostname = "127.0.0.1";
-  }
-}
-
 const VOLATILE_IDENTITY_QUERY_KEYS = ["sid", "spx"];
 const VOLATILE_IDENTITY_RECORD_KEYS = ["sid", "spx"];
-
-function shouldNormalizeRequesterIp(host: string): boolean {
-  const ip = ipv4ToNumber(host);
-  if (ip === null) return false;
-  if (ip === ipv4ToNumber("127.0.0.1")) return true;
-  return CLOUDFLARE_EGRESS_IPV4_RANGES.some(([start, end]) => ip >= start && ip <= end);
-}
-
-function ipv4ToNumber(input: string): number | null {
-  const parts = input.split(".");
-  if (parts.length !== 4) return null;
-  let value = 0;
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) return null;
-    const octet = Number(part);
-    if (!Number.isInteger(octet) || octet < 0 || octet > 255) return null;
-    value = (value * 256) + octet;
-  }
-  return value;
-}
-
-function cidrRange(cidr: string): [number, number] {
-  const [base, prefixText] = cidr.split("/");
-  const baseNumber = ipv4ToNumber(base);
-  const prefix = Number(prefixText);
-  if (baseNumber === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return [0, -1];
-  const size = 2 ** (32 - prefix);
-  const start = Math.floor(baseNumber / size) * size;
-  return [start, start + size - 1];
-}
-
-const CLOUDFLARE_EGRESS_IPV4_RANGES = [
-  "103.21.244.0/22",
-  "103.22.200.0/22",
-  "103.31.4.0/22",
-  "104.16.0.0/13",
-  "104.24.0.0/14",
-  "108.162.192.0/18",
-  "131.0.72.0/22",
-  "141.101.64.0/18",
-  "162.158.0.0/15",
-  "172.64.0.0/13",
-  "173.245.48.0/20",
-  "188.114.96.0/20",
-  "190.93.240.0/20",
-  "197.234.240.0/22",
-  "198.41.128.0/17"
-].map(cidrRange);
 
 function stableJsonStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`;
@@ -1236,16 +1175,29 @@ async function readImportSources(body: JsonRecord): Promise<ImportSourceContent[
   const urls = parseEndpointValues(body.url ?? body.urls);
   for (const sourceUrl of urls) {
     const res = await fetch(cacheBustedImportUrl(sourceUrl), {
-      headers: {
-        "user-agent": "cf-tunnel-control-plane/0.1",
-        "cache-control": "no-cache",
-        "pragma": "no-cache"
-      }
+      headers: importSourceFetchHeaders(sourceUrl)
     });
     if (!res.ok) throw new HttpError(400, `failed to fetch ${sourceUrl}: HTTP ${res.status}`);
     sources.push({ name: sourceUrl, groupName, content: await res.text() });
   }
   return sources;
+}
+
+function importSourceFetchHeaders(sourceUrl: string): Headers {
+  const headers = new Headers({
+    "user-agent": "cf-tunnel-control-plane/0.1",
+    "accept": "*/*",
+    "cache-control": "no-cache",
+    "pragma": "no-cache"
+  });
+  try {
+    const url = new URL(sourceUrl);
+    headers.set("x-forwarded-host", url.host);
+    headers.set("x-forwarded-proto", url.protocol.replace(":", "") || "https");
+  } catch {
+    // Keep the request usable for non-URL inputs that fetch can still handle.
+  }
+  return headers;
 }
 
 function cacheBustedImportUrl(sourceUrl: string): string {
