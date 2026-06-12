@@ -3,11 +3,15 @@ import { __adminApiTestHooks } from "../src/admin-api";
 import type { Env, PreferredEndpointRow, ProxyNodeRow } from "../src/types";
 
 type EndpointSelection = { proxy_node_id: string; endpoint_id: string; enabled: number };
+type TrafficBinding = { proxy_node_id: string; traffic_key: string; enabled: number };
+type SniSelection = { proxy_node_id: string; sni_id: string; enabled: number };
 
 type TableMap = {
   nodes: ProxyNodeRow[];
   endpoints: PreferredEndpointRow[];
   endpointSelections: EndpointSelection[];
+  trafficBindings?: TrafficBinding[];
+  sniSelections?: SniSelection[];
 };
 
 class MockStatement {
@@ -65,6 +69,19 @@ class MockStatement {
       return;
     }
 
+    if (this.query.includes("DELETE FROM proxy_nodes")
+      && this.query.includes("remark IN")
+      && this.query.includes("import_source_name IN")) {
+      const remarks = new Set(this.params.map(String));
+      const deletedIds = new Set(this.tables.nodes
+        .filter((row) => (row.remark && remarks.has(row.remark)) || (row.import_source_name && remarks.has(row.import_source_name)))
+        .map((row) => row.id));
+      this.tables.nodes = this.tables.nodes.filter((row) => !deletedIds.has(row.id));
+      this.tables.endpointSelections = this.tables.endpointSelections.filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.trafficBindings = (this.tables.trafficBindings || []).filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.sniSelections = (this.tables.sniSelections || []).filter((row) => !deletedIds.has(row.proxy_node_id));
+      return;
+    }
     if (this.query.startsWith("DELETE FROM proxy_nodes WHERE remark IN")) {
       const remarks = new Set(this.params.map(String));
       const deletedIds = new Set(this.tables.nodes.filter((row) => row.remark && remarks.has(row.remark)).map((row) => row.id));
@@ -86,6 +103,30 @@ class MockStatement {
       );
       this.tables.endpointSelections.push({ proxy_node_id: nodeId, endpoint_id: endpointId, enabled: 1 });
     }
+    if (this.query.startsWith("DELETE FROM proxy_node_traffic_bindings")) {
+      const nodeId = String(this.params[0]);
+      this.tables.trafficBindings = (this.tables.trafficBindings || []).filter((row) => row.proxy_node_id !== nodeId);
+      return;
+    }
+    if (this.query.startsWith("INSERT OR REPLACE INTO proxy_node_traffic_bindings")) {
+      const [nodeId, trafficKey] = this.params.map(String);
+      this.tables.trafficBindings = (this.tables.trafficBindings || []).filter(
+        (row) => !(row.proxy_node_id === nodeId && row.traffic_key === trafficKey)
+      );
+      this.tables.trafficBindings.push({ proxy_node_id: nodeId, traffic_key: trafficKey, enabled: 1 });
+    }
+    if (this.query.startsWith("DELETE FROM proxy_node_sni_selections")) {
+      const nodeId = String(this.params[0]);
+      this.tables.sniSelections = (this.tables.sniSelections || []).filter((row) => row.proxy_node_id !== nodeId);
+      return;
+    }
+    if (this.query.startsWith("INSERT OR REPLACE INTO proxy_node_sni_selections")) {
+      const [nodeId, sniId] = this.params.map(String);
+      this.tables.sniSelections = (this.tables.sniSelections || []).filter(
+        (row) => !(row.proxy_node_id === nodeId && row.sni_id === sniId)
+      );
+      this.tables.sniSelections.push({ proxy_node_id: nodeId, sni_id: sniId, enabled: 1 });
+    }
   }
 
   private rows(): unknown[] {
@@ -93,12 +134,28 @@ class MockStatement {
       const remarks = new Set(this.params.map(String));
       return this.tables.nodes.filter((row) => row.remark && remarks.has(row.remark)).map(({ id, name, import_key }) => ({ id, name, import_key }));
     }
+    if (this.query.includes("FROM proxy_nodes n")
+      && this.query.includes("LEFT JOIN proxy_node_mutable_state")
+      && this.query.includes("WHERE n.remark IN")) {
+      const remarks = new Set(this.params.map(String));
+      return this.tables.nodes
+        .filter((row) => (row.remark && remarks.has(row.remark)) || (row.import_source_name && remarks.has(row.import_source_name)))
+        .map(({ id, name, remark, enabled, import_key }) => ({ id, name, remark, enabled, import_key }));
+    }
     if (this.query.includes("FROM proxy_node_endpoint_selections s")) {
       const nodeIds = new Set(this.params.map(String));
       const nodeScopedEndpoints = new Set(this.tables.endpoints.filter((row) => row.scope === "node").map((row) => row.id));
       return this.tables.endpointSelections.filter(
         (row) => row.enabled === 1 && nodeIds.has(row.proxy_node_id) && nodeScopedEndpoints.has(row.endpoint_id)
       );
+    }
+    if (this.query.includes("FROM proxy_node_traffic_bindings")) {
+      const nodeIds = new Set(this.params.map(String));
+      return (this.tables.trafficBindings || []).filter((row) => row.enabled === 1 && nodeIds.has(row.proxy_node_id));
+    }
+    if (this.query.includes("FROM proxy_node_sni_selections")) {
+      const nodeIds = new Set(this.params.map(String));
+      return (this.tables.sniSelections || []).filter((row) => row.enabled === 1 && nodeIds.has(row.proxy_node_id));
     }
     if (this.query.includes("SELECT * FROM proxy_nodes WHERE id = ?")) {
       return this.tables.nodes.filter((row) => row.id === this.params[0]);
@@ -160,6 +217,7 @@ describe("admin import refresh", () => {
           value: "192.168.1.120",
           label: null,
           resolve_mode: "none",
+          selection_mode: "additive",
           enabled: 1,
           scope: "node",
           default_selected: 0,
@@ -173,6 +231,7 @@ describe("admin import refresh", () => {
           value: "cdn.example.com",
           label: null,
           resolve_mode: "none",
+          selection_mode: "additive",
           enabled: 1,
           scope: "global",
           default_selected: 1,
@@ -205,6 +264,49 @@ describe("admin import refresh", () => {
     expect(tables.nodes[0].id).not.toBe("old_node");
     expect(tables.endpointSelections).toEqual([
       { proxy_node_id: tables.nodes[0].id, endpoint_id: "endpoint_private", enabled: 1 }
+    ]);
+  });
+
+  it("preserves imported node display state and traffic bindings when refreshed", async () => {
+    const rawConfig = "vless://00000000-0000-4000-8000-000000000000@new.example:443?security=tls&type=ws#content";
+    const oldNode = node("old_node", "custom alias", "custom remark", rawConfig, "0eeaed8594ef0d34470debacf478e7c3f72f4140");
+    oldNode.import_key = "import:v1:managed-sub:0eeaed8594ef0d34470debacf478e7c3f72f4140";
+    oldNode.import_source_name = "managed-sub";
+    oldNode.enabled = 0;
+    const tables: TableMap = {
+      nodes: [oldNode],
+      endpoints: [],
+      endpointSelections: [],
+      trafficBindings: [{ proxy_node_id: "old_node", traffic_key: "swarm:hd01|target:http://s1:80", enabled: 1 }],
+      sniSelections: [{ proxy_node_id: "old_node", sni_id: "sni_1", enabled: 1 }]
+    };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "managed-sub",
+      replaceExistingForRemark: true,
+      candidates: [{
+        id: "candidate_1",
+        sourceName: "managed-sub",
+        sourceType: "v2ray_uri",
+        name: "content",
+        rawConfig,
+        protocol: "vless"
+      }]
+    });
+
+    expect(result).toMatchObject({ imported: 1, deletedOld: 1, skipped: 0 });
+    expect(tables.nodes).toHaveLength(1);
+    expect(tables.nodes[0]).toMatchObject({
+      name: "custom alias",
+      remark: "custom remark",
+      enabled: 0,
+      use_tunnel: 1
+    });
+    expect(tables.trafficBindings).toEqual([
+      { proxy_node_id: tables.nodes[0].id, traffic_key: "swarm:hd01|target:http://s1:80", enabled: 1 }
+    ]);
+    expect(tables.sniSelections).toEqual([
+      { proxy_node_id: tables.nodes[0].id, sni_id: "sni_1", enabled: 1 }
     ]);
   });
 

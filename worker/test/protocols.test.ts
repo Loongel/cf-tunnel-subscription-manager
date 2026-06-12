@@ -26,6 +26,7 @@ const endpoint: PreferredEndpointRow = {
   value: "162.159.1.1",
   label: "CF IP A",
   resolve_mode: "none",
+  selection_mode: "additive",
   enabled: 1,
   scope: "global",
   default_selected: 1,

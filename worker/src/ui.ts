@@ -409,7 +409,7 @@ export function renderAdminUi(env: Env): string {
         </div>
         <div class="formgrid">
           <label>Type<select id="endpointType"><option value="ip">IP</option><option value="domain">Domain</option></select></label>
-          <label>Role<select id="endpointRole"><option value="global">Global Always On</option><option value="node">Binding Option</option></select></label>
+          <label>Role<select id="endpointRole"><option value="global">Global Always On</option><option value="node">Binding Option</option><option value="exclusive">Exclusive Binding Option</option></select></label>
           <label>Domain Resolve<select id="endpointResolveMode"><option value="none">Do Not Resolve</option><option value="ipv4">Resolve IPv4</option><option value="ipv6">Resolve IPv6</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
@@ -643,7 +643,7 @@ export function renderAdminUi(env: Env): string {
       state.endpoints = data.preferredEndpoints || [];
       renderEndpointOptions();
       endpointsBody.innerHTML = state.endpoints.map((row) =>
-        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(row.scope === 'global' ? 'Global Always On' : 'Binding Option') + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(endpointRoleLabel(row)) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
       ).join('') || '<tr><td colspan="6" class="muted">No preferred endpoints.</td></tr>';
     }
     async function refreshGeneratedNodes() {
@@ -768,6 +768,11 @@ export function renderAdminUi(env: Env): string {
       if (row.resolve_mode === 'ipv4') return 'Resolve IPv4';
       if (row.resolve_mode === 'ipv6') return 'Resolve IPv6';
       return 'Do Not Resolve';
+    }
+    function endpointRoleLabel(row) {
+      if (row.scope === 'global') return 'Global Always On';
+      if (row.selection_mode === 'exclusive') return 'Exclusive Binding Option';
+      return 'Binding Option';
     }
     function syncEndpointResolveModeControl() {
       const isDomain = byId('endpointType').value === 'domain';
@@ -1342,7 +1347,7 @@ export function renderAdminUi(env: Env): string {
             editingEndpointId = row.id;
             byId('createEndpoint').textContent = 'Save Endpoint';
             byId('endpointType').value = row.type || 'ip';
-            byId('endpointRole').value = row.scope || 'global';
+            byId('endpointRole').value = row.scope === 'node' && row.selection_mode === 'exclusive' ? 'exclusive' : (row.scope || 'global');
             byId('endpointResolveMode').value = row.resolve_mode || 'none';
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
             byId('endpointValues').value = row.value || '';
@@ -1626,7 +1631,8 @@ export function renderAdminUi(env: Env): string {
           type: byId('endpointType').value,
           resolveMode: byId('endpointResolveMode').value,
           label: byId('endpointLabel').value,
-          scope: role,
+          scope: role === 'exclusive' ? 'node' : role,
+          selectionMode: role === 'exclusive' ? 'exclusive' : 'additive',
           defaultSelected: role === 'global',
           enabled: byId('endpointEnabled').value === 'true',
           sortOrder: Number(byId('endpointSort').value || 0),

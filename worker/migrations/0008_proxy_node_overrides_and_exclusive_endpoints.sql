@@ -1,0 +1,2 @@
+-- Migration name retained because it was applied during an interrupted deployment.
+-- The shipped schema change for mutable proxy node state is in 0009.

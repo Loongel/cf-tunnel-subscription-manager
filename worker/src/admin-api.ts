@@ -38,8 +38,12 @@ interface CountRow {
 interface DeletedImportedNodeRow {
   id: string;
   name: string;
+  remark: string | null;
+  enabled: number;
   import_key: string | null;
   selectedEndpointIds: string[];
+  selectedTrafficKeys: string[];
+  selectedSniIds: string[];
 }
 
 interface ImportSourceContent {
@@ -315,8 +319,14 @@ async function createRestartCommand(env: Env, tunnelId: string, createdBy: "admi
 async function listProxyNodes(env: Env): Promise<unknown[]> {
   const rows = await all<ProxyNodeRow>(
     env.DB,
-    `SELECT n.*, t.public_hostname AS tunnel_public_hostname, t.public_url AS tunnel_public_url
+    `SELECT n.*,
+       COALESCE(s.name, n.name) AS name,
+       COALESCE(s.remark, n.remark) AS remark,
+       COALESCE(s.enabled, n.enabled) AS enabled,
+       t.public_hostname AS tunnel_public_hostname,
+       t.public_url AS tunnel_public_url
      FROM proxy_nodes n
+     LEFT JOIN proxy_node_mutable_state s ON s.import_key = n.import_key
      LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
      ORDER BY n.name`
   );
@@ -427,7 +437,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     deletedOld = deletedRows.length;
   }
 
-  const deletedEndpointIdsByImportKey = endpointSelectionsByDeletedImportKey(deletedRows);
+  const deletedStateByImportKey = importStateByDeletedImportKey(deletedRows);
 
   for (const item of activeCandidates) {
     const name = item.name.trim();
@@ -448,7 +458,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
 
     const itemVariants = validCarriers.length > 0
       ? validCarriers.map((carrier) => ({
-        name: importedCarrierVariantName(name, carrier.name),
+        name: importedCarrierVariantName(name, displayNameForImportCandidate(carrier, deletedStateByImportKey)),
         rawConfig: composeFallbackRawConfig(item.rawConfig, item.sourceType, carrier.rawConfig, carrier.sourceType),
         item,
         sourceName: item.sourceName
@@ -474,23 +484,33 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     const item = variant.item;
     try {
       const stableId = await stableImportedNodeId(variant.identity.importKey);
-      const restoredEndpointIds = deletedEndpointIdsByImportKey.get(variant.identity.importKey) || [];
+      const restoredState = deletedStateByImportKey.get(variant.identity.importKey);
+      const restoredEndpointIds = restoredState?.selectedEndpointIds || [];
       newIdsByImportKey.set(variant.identity.importKey, stableId);
       const payload = {
-        name: variant.name,
-        remark: remark || item.sourceName,
+        name: restoredState?.name || variant.name,
+        remark: restoredState?.remark ?? (remark || item.sourceName),
         rawConfig: variant.rawConfig,
         sourceType: item.sourceType,
         importKey: variant.identity.importKey,
         importSourceName: remark || item.sourceGroup || item.sourceName,
         rawConfigHash: variant.identity.contentHash,
         protocol: item.protocol,
-        enabled: body.enabled === undefined ? true : body.enabled,
-        useTunnel: false,
+        enabled: restoredState?.enabled ?? (body.enabled === undefined ? true : body.enabled),
+        useTunnel: (restoredState?.selectedTrafficKeys.length || restoredState?.selectedSniIds.length) ? true : false,
         ...(restoredEndpointIds.length > 0 ? { selectedEndpointIds: restoredEndpointIds as unknown as JsonValue } : {}),
+        ...((restoredState?.selectedTrafficKeys || []).length > 0 ? { selectedTrafficKeys: restoredState?.selectedTrafficKeys as unknown as JsonValue } : {}),
+        ...((restoredState?.selectedSniIds || []).length > 0 ? { selectedSniIds: restoredState?.selectedSniIds as unknown as JsonValue } : {}),
         id: stableId
       };
       const result = await upsertImportedProxyNode(env, payload);
+      if (restoredState) {
+        await upsertProxyNodeMutableState(env, variant.identity.importKey, {
+          name: restoredState.name,
+          remark: restoredState.remark,
+          enabled: restoredState.enabled
+        });
+      }
       imported.push(result.row);
       if (result.created) created += 1;
       else updated += 1;
@@ -556,16 +576,36 @@ function replacementRemarks(body: JsonRecord, remark: string): string[] {
 async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<DeletedImportedNodeRow[]> {
   if (remarks.length === 0) return [];
   const placeholders = remarks.map(() => "?").join(", ");
-  const rows = await all<{ id: string; name: string; import_key: string | null }>(
+  const rows = await all<{ id: string; name: string; remark: string | null; enabled: number; import_key: string | null }>(
     env.DB,
-    `SELECT id, name, import_key FROM proxy_nodes WHERE remark IN (${placeholders})`,
+    `SELECT n.id,
+       COALESCE(s.name, n.name) AS name,
+       COALESCE(s.remark, n.remark) AS remark,
+       COALESCE(s.enabled, n.enabled) AS enabled,
+       n.import_key
+     FROM proxy_nodes n
+     LEFT JOIN proxy_node_mutable_state s ON s.import_key = n.import_key
+     WHERE n.remark IN (${placeholders})
+        OR n.import_source_name IN (${placeholders})`,
+    ...remarks,
     ...remarks
   );
   const selectedEndpointIdsByNodeId = await selectedNodeScopedEndpointIds(env, rows.map((row) => row.id));
-  await run(env.DB, `DELETE FROM proxy_nodes WHERE remark IN (${placeholders})`, ...remarks);
+  const trafficKeysByNodeId = await selectedTrafficKeysByNodeId(env, rows.map((row) => row.id));
+  const sniIdsByNodeId = await selectedSniIdsByNodeId(env, rows.map((row) => row.id));
+  await run(
+    env.DB,
+    `DELETE FROM proxy_nodes
+     WHERE remark IN (${placeholders})
+        OR import_source_name IN (${placeholders})`,
+    ...remarks,
+    ...remarks
+  );
   return rows.map((row) => ({
     ...row,
-    selectedEndpointIds: selectedEndpointIdsByNodeId.get(row.id) || []
+    selectedEndpointIds: selectedEndpointIdsByNodeId.get(row.id) || [],
+    selectedTrafficKeys: trafficKeysByNodeId.get(row.id) || [],
+    selectedSniIds: sniIdsByNodeId.get(row.id) || []
   }));
 }
 
@@ -591,18 +631,58 @@ async function selectedNodeScopedEndpointIds(env: Env, nodeIds: string[]): Promi
   return output;
 }
 
-function endpointSelectionsByDeletedImportKey(rows: DeletedImportedNodeRow[]): Map<string, string[]> {
+async function selectedTrafficKeysByNodeId(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
   const output = new Map<string, string[]>();
+  if (nodeIds.length === 0) return output;
+  const placeholders = nodeIds.map(() => "?").join(", ");
+  const rows = await all<{ proxy_node_id: string; traffic_key: string }>(
+    env.DB,
+    `SELECT proxy_node_id, traffic_key
+     FROM proxy_node_traffic_bindings
+     WHERE enabled = 1 AND proxy_node_id IN (${placeholders})`,
+    ...nodeIds
+  );
   for (const row of rows) {
-    if (!row.import_key) continue;
-    if (row.selectedEndpointIds.length === 0) continue;
-    const ids = output.get(row.import_key) || [];
-    for (const endpointId of row.selectedEndpointIds) {
-      if (!ids.includes(endpointId)) ids.push(endpointId);
-    }
-    output.set(row.import_key, ids);
+    const keys = output.get(row.proxy_node_id) || [];
+    keys.push(row.traffic_key);
+    output.set(row.proxy_node_id, keys);
   }
   return output;
+}
+
+async function selectedSniIdsByNodeId(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
+  const output = new Map<string, string[]>();
+  if (nodeIds.length === 0) return output;
+  const placeholders = nodeIds.map(() => "?").join(", ");
+  const rows = await all<{ proxy_node_id: string; sni_id: string }>(
+    env.DB,
+    `SELECT proxy_node_id, sni_id
+     FROM proxy_node_sni_selections
+     WHERE enabled = 1 AND proxy_node_id IN (${placeholders})`,
+    ...nodeIds
+  );
+  for (const row of rows) {
+    const ids = output.get(row.proxy_node_id) || [];
+    ids.push(row.sni_id);
+    output.set(row.proxy_node_id, ids);
+  }
+  return output;
+}
+
+function importStateByDeletedImportKey(rows: DeletedImportedNodeRow[]): Map<string, DeletedImportedNodeRow> {
+  const output = new Map<string, DeletedImportedNodeRow>();
+  for (const row of rows) {
+    if (!row.import_key) continue;
+    output.set(row.import_key, row);
+  }
+  return output;
+}
+
+function displayNameForImportCandidate(
+  candidate: ImportCandidate,
+  deletedStateByImportKey: Map<string, DeletedImportedNodeRow>
+): string {
+  return deletedStateByImportKey.get(candidate.importKey)?.name || candidate.name;
 }
 
 async function stableImportedNodeId(importKey: string): Promise<string> {
@@ -1213,6 +1293,13 @@ function cacheBustedImportUrl(sourceUrl: string): string {
 async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<ProxyNodeRow | null> {
   const current = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", id);
   if (!current) throw new HttpError(404, "proxy node not found");
+  if (current.import_key) {
+    await upsertProxyNodeMutableState(env, current.import_key, {
+      name: body.name === undefined ? undefined : optionalString(body.name) || current.name,
+      remark: body.remark === undefined ? undefined : body.remark === null ? null : optionalString(body.remark) || current.remark,
+      enabled: body.enabled === undefined ? undefined : boolToInt(body.enabled)
+    });
+  }
   const rawConfig = optionalString(body.rawConfig) || current.raw_config;
   const sourceType = optionalString(body.sourceType) || current.source_type;
   await run(
@@ -1243,6 +1330,36 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
   );
   await replaceNodeLinks(env, id, body);
   return await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", id);
+}
+
+async function upsertProxyNodeMutableState(
+  env: Env,
+  importKey: string,
+  state: { name?: string | null; remark?: string | null; enabled?: number }
+): Promise<void> {
+  if (state.name === undefined && state.remark === undefined && state.enabled === undefined) return;
+  const current = await first<{ name: string | null; remark: string | null; enabled: number | null }>(
+    env.DB,
+    "SELECT name, remark, enabled FROM proxy_node_mutable_state WHERE import_key = ?",
+    importKey
+  );
+  const timestamp = nowIso();
+  await run(
+    env.DB,
+    `INSERT INTO proxy_node_mutable_state (import_key, name, remark, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(import_key) DO UPDATE SET
+       name = excluded.name,
+       remark = excluded.remark,
+       enabled = excluded.enabled,
+       updated_at = excluded.updated_at`,
+    importKey,
+    state.name === undefined ? current?.name ?? null : state.name,
+    state.remark === undefined ? current?.remark ?? null : state.remark,
+    state.enabled === undefined ? current?.enabled ?? null : state.enabled,
+    timestamp,
+    timestamp
+  );
 }
 
 async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Promise<void> {
@@ -1386,6 +1503,7 @@ async function createPreferredEndpointForValue(
   const resolveMode = endpointResolveMode(body.resolveMode, type);
   const scope = optionalString(body.scope) || "global";
   if (scope !== "global" && scope !== "node") throw new HttpError(400, "scope must be global or node");
+  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   const timestamp = nowIso();
   const existing = await first<PreferredEndpointRow>(
     env.DB,
@@ -1398,10 +1516,11 @@ async function createPreferredEndpointForValue(
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
-        label = ?, resolve_mode = ?, enabled = ?, default_selected = ?, sort_order = ?, updated_at = ?
+        label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, default_selected = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
       resolveMode,
+      selectionMode,
       body.enabled === undefined ? existing.enabled : boolToInt(body.enabled, true),
       body.defaultSelected === undefined
         ? existing.default_selected
@@ -1417,13 +1536,14 @@ async function createPreferredEndpointForValue(
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
-      (id, type, value, label, resolve_mode, enabled, scope, default_selected, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, type, value, label, resolve_mode, selection_mode, enabled, scope, default_selected, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     type,
     value,
     optionalString(body.label),
     resolveMode,
+    selectionMode,
     boolToInt(body.enabled, true),
     scope,
     boolToInt(body.defaultSelected),
@@ -1443,15 +1563,17 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
   const resolveMode = body.resolveMode === undefined
     ? endpointResolveMode(current.resolve_mode, type)
     : endpointResolveMode(body.resolveMode, type);
+  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   await run(
     env.DB,
     `UPDATE preferred_endpoints SET
-      type = ?, value = ?, label = ?, resolve_mode = ?, enabled = ?, scope = ?, default_selected = ?, sort_order = ?, updated_at = ?
+      type = ?, value = ?, label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, scope = ?, default_selected = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
     type,
     optionalString(body.value) || current.value,
     body.label === null ? null : optionalString(body.label) || current.label,
     resolveMode,
+    selectionMode,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     scope,
     body.defaultSelected === undefined
@@ -1469,6 +1591,11 @@ function endpointResolveMode(value: unknown, type: string): PreferredEndpointRow
   if (type !== "domain") return "none";
   if (value === "ipv4" || value === "ipv6") return value;
   return "none";
+}
+
+function endpointSelectionMode(value: unknown, scope: string): PreferredEndpointRow["selection_mode"] {
+  if (scope !== "node") return "additive";
+  return optionalString(value) === "exclusive" ? "exclusive" : "additive";
 }
 
 async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRecord): Promise<void> {

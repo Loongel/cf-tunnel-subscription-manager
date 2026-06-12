@@ -116,11 +116,17 @@ export async function previewSubscription(env: Env, options: SubscriptionOptions
 }
 
 async function loadNodes(env: Env, options: SubscriptionOptions): Promise<ProxyNodeRow[]> {
-  const enabledClause = options.includeDisabled ? "" : "AND n.enabled = 1";
+  const enabledClause = options.includeDisabled ? "" : "AND COALESCE(s.enabled, n.enabled) = 1";
   return await all<ProxyNodeRow>(
     env.DB,
-    `SELECT n.*, t.public_hostname AS tunnel_public_hostname, t.public_url AS tunnel_public_url
+    `SELECT n.*,
+       COALESCE(s.name, n.name) AS name,
+       COALESCE(s.remark, n.remark) AS remark,
+       COALESCE(s.enabled, n.enabled) AS enabled,
+       t.public_hostname AS tunnel_public_hostname,
+       t.public_url AS tunnel_public_url
      FROM proxy_nodes n
+     LEFT JOIN proxy_node_mutable_state s ON s.import_key = n.import_key
      LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
      WHERE 1 = 1 ${enabledClause}
      ORDER BY n.name`
@@ -328,6 +334,9 @@ function selectEndpoints(
   const selected = selectedByNode.get(nodeId);
   const global = available.filter((endpoint) => endpoint.scope === "global");
   if (!selected || selected.size === 0) return global;
+  const selectedEndpoints = available.filter((endpoint) => selected.has(endpoint.id));
+  const exclusive = selectedEndpoints.filter((endpoint) => endpoint.selection_mode === "exclusive");
+  if (exclusive.length > 0) return exclusive;
   return available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id));
 }
 

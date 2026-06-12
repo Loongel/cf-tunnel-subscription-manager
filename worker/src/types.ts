@@ -94,6 +94,7 @@ export interface PreferredEndpointRow {
   value: string;
   label: string | null;
   resolve_mode: "none" | "ipv4" | "ipv6";
+  selection_mode: "additive" | "exclusive";
   enabled: number;
   scope: "global" | "node";
   default_selected: number;

@@ -90,6 +90,7 @@ const endpoint: PreferredEndpointRow = {
   value: "104.16.0.1",
   label: "cf-ip",
   resolve_mode: "none",
+  selection_mode: "additive",
   enabled: 1,
   scope: "global",
   default_selected: 1,
@@ -279,6 +280,37 @@ describe("subscription generation", () => {
 
     expect(fetch).toHaveBeenCalledOnce();
     expect(generated.map((item) => item.endpointValue)).toEqual(["198.51.100.10", "198.51.100.10"]);
+  });
+
+  it("uses selected exclusive endpoints instead of global endpoints", async () => {
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [
+        endpoint,
+        {
+          ...endpoint,
+          id: "endpoint_exclusive",
+          value: "192.0.2.10",
+          label: "exclusive-ip",
+          scope: "node",
+          default_selected: 0,
+          selection_mode: "exclusive"
+        }
+      ],
+      endpointSelections: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_exclusive", enabled: 1 }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(generated).toHaveLength(1);
+    expect(generated[0]).toMatchObject({
+      endpointId: "endpoint_exclusive",
+      endpointValue: "192.0.2.10",
+      endpointLabel: "exclusive-ip"
+    });
   });
 });
 
