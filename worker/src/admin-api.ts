@@ -42,6 +42,7 @@ interface DeletedImportedNodeRow {
   enabled: number;
   import_key: string | null;
   selectedEndpointIds: string[];
+  exclusiveEndpointScopeIds: string[];
   selectedTrafficKeys: string[];
   selectedSniIds: string[];
 }
@@ -522,6 +523,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
 
   if (deletedRows.length > 0 && newIdsByImportKey.size > 0) {
     await migrateGroupDerivedNodeIds(env, deletedRows, newIdsByImportKey);
+    await migrateExclusiveEndpointScopes(env, deletedRows, newIdsByImportKey);
   }
 
   return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
@@ -591,6 +593,7 @@ async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promis
     ...remarks
   );
   const selectedEndpointIdsByNodeId = await selectedNodeScopedEndpointIds(env, rows.map((row) => row.id));
+  const exclusiveEndpointScopeIdsByNodeId = await exclusiveEndpointScopeIds(env, rows.map((row) => row.id));
   const trafficKeysByNodeId = await selectedTrafficKeysByNodeId(env, rows.map((row) => row.id));
   const sniIdsByNodeId = await selectedSniIdsByNodeId(env, rows.map((row) => row.id));
   await run(
@@ -604,9 +607,32 @@ async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promis
   return rows.map((row) => ({
     ...row,
     selectedEndpointIds: selectedEndpointIdsByNodeId.get(row.id) || [],
+    exclusiveEndpointScopeIds: exclusiveEndpointScopeIdsByNodeId.get(row.id) || [],
     selectedTrafficKeys: trafficKeysByNodeId.get(row.id) || [],
     selectedSniIds: sniIdsByNodeId.get(row.id) || []
   }));
+}
+
+async function exclusiveEndpointScopeIds(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
+  const output = new Map<string, string[]>();
+  if (nodeIds.length === 0) return output;
+  const placeholders = nodeIds.map(() => "?").join(", ");
+  const rows = await all<{ proxy_node_id: string; endpoint_id: string }>(
+    env.DB,
+    `SELECT s.proxy_node_id, s.endpoint_id
+     FROM preferred_endpoint_node_scopes s
+     JOIN preferred_endpoints e ON e.id = s.endpoint_id
+     WHERE e.scope = 'node'
+       AND e.selection_mode = 'exclusive'
+       AND s.proxy_node_id IN (${placeholders})`,
+    ...nodeIds
+  );
+  for (const row of rows) {
+    const ids = output.get(row.proxy_node_id) || [];
+    ids.push(row.endpoint_id);
+    output.set(row.proxy_node_id, ids);
+  }
+  return output;
 }
 
 async function selectedNodeScopedEndpointIds(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
@@ -815,6 +841,32 @@ async function migrateGroupDerivedNodeIds(
         safeJson(filter),
         nowIso(),
         group.id
+      );
+    }
+  }
+}
+
+async function migrateExclusiveEndpointScopes(
+  env: Env,
+  deletedRows: DeletedImportedNodeRow[],
+  newIdsByImportKey: Map<string, string>
+): Promise<void> {
+  for (const row of deletedRows) {
+    if (!row.import_key || row.exclusiveEndpointScopeIds.length === 0) continue;
+    const newId = newIdsByImportKey.get(row.import_key);
+    if (!newId) continue;
+    for (const endpointId of row.exclusiveEndpointScopeIds) {
+      await run(
+        env.DB,
+        "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
+        endpointId,
+        newId
+      );
+      await run(
+        env.DB,
+        "INSERT OR REPLACE INTO proxy_node_endpoint_selections (proxy_node_id, endpoint_id, enabled) VALUES (?, ?, 1)",
+        newId,
+        endpointId
       );
     }
   }
@@ -1528,7 +1580,6 @@ async function createPreferredEndpointForValue(
   const resolveMode = endpointResolveMode(body.resolveMode, type);
   const scope = optionalString(body.scope) || "global";
   if (scope !== "global" && scope !== "node") throw new HttpError(400, "scope must be global or node");
-  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   const timestamp = nowIso();
   const existing = await first<PreferredEndpointRow>(
     env.DB,
@@ -1538,6 +1589,7 @@ async function createPreferredEndpointForValue(
     scope
   );
   if (existing) {
+    const selectionMode = endpointSelectionModeForUpdate(body.selectionMode, scope, existing);
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
@@ -1558,6 +1610,7 @@ async function createPreferredEndpointForValue(
     return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", existing.id) };
   }
 
+  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
@@ -1588,7 +1641,7 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
   const resolveMode = body.resolveMode === undefined
     ? endpointResolveMode(current.resolve_mode, type)
     : endpointResolveMode(body.resolveMode, type);
-  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
+  const selectionMode = endpointSelectionModeForUpdate(body.selectionMode, scope, current);
   await run(
     env.DB,
     `UPDATE preferred_endpoints SET
@@ -1621,6 +1674,16 @@ function endpointResolveMode(value: unknown, type: string): PreferredEndpointRow
 function endpointSelectionMode(value: unknown, scope: string): PreferredEndpointRow["selection_mode"] {
   if (scope !== "node") return "additive";
   return optionalString(value) === "exclusive" ? "exclusive" : "additive";
+}
+
+function endpointSelectionModeForUpdate(
+  value: unknown,
+  scope: string,
+  current: PreferredEndpointRow
+): PreferredEndpointRow["selection_mode"] {
+  if (scope !== "node") return "additive";
+  if (value === undefined && current.scope === "node") return current.selection_mode;
+  return endpointSelectionMode(value, scope);
 }
 
 async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRecord): Promise<void> {

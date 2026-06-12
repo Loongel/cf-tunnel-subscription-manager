@@ -5,11 +5,13 @@ import type { Env, PreferredEndpointRow, ProxyNodeRow } from "../src/types";
 type EndpointSelection = { proxy_node_id: string; endpoint_id: string; enabled: number };
 type TrafficBinding = { proxy_node_id: string; traffic_key: string; enabled: number };
 type SniSelection = { proxy_node_id: string; sni_id: string; enabled: number };
+type EndpointScope = { proxy_node_id: string; endpoint_id: string };
 
 type TableMap = {
   nodes: ProxyNodeRow[];
   endpoints: PreferredEndpointRow[];
   endpointSelections: EndpointSelection[];
+  endpointScopes?: EndpointScope[];
   trafficBindings?: TrafficBinding[];
   sniSelections?: SniSelection[];
 };
@@ -78,6 +80,7 @@ class MockStatement {
         .map((row) => row.id));
       this.tables.nodes = this.tables.nodes.filter((row) => !deletedIds.has(row.id));
       this.tables.endpointSelections = this.tables.endpointSelections.filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.endpointScopes = (this.tables.endpointScopes || []).filter((row) => !deletedIds.has(row.proxy_node_id));
       this.tables.trafficBindings = (this.tables.trafficBindings || []).filter((row) => !deletedIds.has(row.proxy_node_id));
       this.tables.sniSelections = (this.tables.sniSelections || []).filter((row) => !deletedIds.has(row.proxy_node_id));
       return;
@@ -87,6 +90,7 @@ class MockStatement {
       const deletedIds = new Set(this.tables.nodes.filter((row) => row.remark && remarks.has(row.remark)).map((row) => row.id));
       this.tables.nodes = this.tables.nodes.filter((row) => !deletedIds.has(row.id));
       this.tables.endpointSelections = this.tables.endpointSelections.filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.endpointScopes = (this.tables.endpointScopes || []).filter((row) => !deletedIds.has(row.proxy_node_id));
       return;
     }
 
@@ -102,6 +106,15 @@ class MockStatement {
         (row) => !(row.proxy_node_id === nodeId && row.endpoint_id === endpointId)
       );
       this.tables.endpointSelections.push({ proxy_node_id: nodeId, endpoint_id: endpointId, enabled: 1 });
+    }
+    if (this.query.startsWith("INSERT OR IGNORE INTO preferred_endpoint_node_scopes")) {
+      const [endpointId, nodeId] = this.params.map(String);
+      const rows = this.tables.endpointScopes || [];
+      if (!rows.some((row) => row.proxy_node_id === nodeId && row.endpoint_id === endpointId)) {
+        rows.push({ proxy_node_id: nodeId, endpoint_id: endpointId });
+      }
+      this.tables.endpointScopes = rows;
+      return;
     }
     if (this.query.startsWith("DELETE FROM proxy_node_traffic_bindings")) {
       const nodeId = String(this.params[0]);
@@ -147,6 +160,15 @@ class MockStatement {
       const nodeScopedEndpoints = new Set(this.tables.endpoints.filter((row) => row.scope === "node").map((row) => row.id));
       return this.tables.endpointSelections.filter(
         (row) => row.enabled === 1 && nodeIds.has(row.proxy_node_id) && nodeScopedEndpoints.has(row.endpoint_id)
+      );
+    }
+    if (this.query.includes("FROM preferred_endpoint_node_scopes s")) {
+      const nodeIds = new Set(this.params.map(String));
+      const exclusiveEndpoints = new Set(this.tables.endpoints
+        .filter((row) => row.scope === "node" && row.selection_mode === "exclusive")
+        .map((row) => row.id));
+      return (this.tables.endpointScopes || []).filter(
+        (row) => nodeIds.has(row.proxy_node_id) && exclusiveEndpoints.has(row.endpoint_id)
       );
     }
     if (this.query.includes("FROM proxy_node_traffic_bindings")) {
@@ -272,6 +294,55 @@ describe("admin import refresh", () => {
     expect(tables.nodes[0].id).not.toBe("old_node");
     expect(tables.endpointSelections).toEqual([
       { proxy_node_id: tables.nodes[0].id, endpoint_id: "endpoint_private", enabled: 1 }
+    ]);
+  });
+
+  it("preserves exclusive endpoint scopes when imported nodes are replaced", async () => {
+    const rawConfig = "vless://00000000-0000-4000-8000-000000000000@new.example:443?security=tls&type=ws#content";
+    const tables: TableMap = {
+      nodes: [node("old_node", "content", "managed-sub", rawConfig, "0eeaed8594ef0d34470debacf478e7c3f72f4140")],
+      endpoints: [{
+        id: "endpoint_exclusive",
+        type: "domain",
+        value: "edge.example.com",
+        label: "exclusive-edge",
+        resolve_mode: "none",
+        selection_mode: "exclusive",
+        enabled: 1,
+        scope: "node",
+        default_selected: 0,
+        sort_order: 0,
+        created_at: "",
+        updated_at: ""
+      }],
+      endpointSelections: [
+        { proxy_node_id: "old_node", endpoint_id: "endpoint_exclusive", enabled: 1 }
+      ],
+      endpointScopes: [
+        { proxy_node_id: "old_node", endpoint_id: "endpoint_exclusive" }
+      ]
+    };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "managed-sub",
+      replaceExistingForRemark: true,
+      candidates: [{
+        id: "candidate_1",
+        sourceName: "managed-sub",
+        sourceType: "v2ray_uri",
+        name: "content",
+        rawConfig,
+        protocol: "vless"
+      }]
+    });
+
+    expect(result).toMatchObject({ imported: 1, deletedOld: 1, skipped: 0 });
+    expect(tables.nodes).toHaveLength(1);
+    expect(tables.endpointScopes).toEqual([
+      { proxy_node_id: tables.nodes[0].id, endpoint_id: "endpoint_exclusive" }
+    ]);
+    expect(tables.endpointSelections).toEqual([
+      { proxy_node_id: tables.nodes[0].id, endpoint_id: "endpoint_exclusive", enabled: 1 }
     ]);
   });
 
