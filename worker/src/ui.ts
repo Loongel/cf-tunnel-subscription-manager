@@ -415,7 +415,19 @@ export function renderAdminUi(env: Env): string {
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
           <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com"></textarea></label>
           <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
-          <label class="wide">Exclusive Nodes<select id="endpointNodeIds" multiple></select></label>
+          <div id="endpointNodePicker" class="subpanel full hidden">
+            <div class="toolbar">
+              <h3>Exclusive Nodes</h3>
+              <div class="small muted"><span id="endpointNodeSelectedCount" class="count">0</span> selected / <span id="endpointNodeVisibleCount" class="count">0</span> visible</div>
+              <div class="actions"><button id="selectAllEndpointNodes" type="button" class="subtle">Select All</button><button id="clearEndpointNodes" type="button" class="subtle">Clear</button></div>
+            </div>
+            <div class="filterbar">
+              <input id="endpointNodeFilter" placeholder="Search nodes">
+              <select id="endpointNodeStatus"><option value="all">All nodes</option><option value="enabled">Enabled</option><option value="direct">Direct</option><option value="traffic">With traffic</option></select>
+            </div>
+            <select id="endpointNodeIds" class="binding-node-select" multiple></select>
+            <div id="endpointNodeList" class="binding-list"></div>
+          </div>
           <div class="actions"><button id="createEndpoint" class="primary">Add Endpoints</button></div>
         </div>
       </div>
@@ -545,6 +557,9 @@ export function renderAdminUi(env: Env): string {
     }
     function selectedAdditionalEndpointIds() {
       return selectedValues(byId('bindingEndpoints')).filter((id) => !id.startsWith('global:'));
+    }
+    function selectedEndpointNodeIds() {
+      return selectedValues(byId('endpointNodeIds')).filter((id) => state.nodes.some((node) => node.id === id));
     }
     function applyMetrics(data) {
       state.overview = data;
@@ -767,12 +782,49 @@ export function renderAdminUi(env: Env): string {
       markSelected(byId('bindingEndpoints'), Array.from(selected));
     }
     function renderEndpointNodeOptions() {
-      const selected = new Set(selectedValues(byId('endpointNodeIds')));
+      const selected = new Set(selectedEndpointNodeIds());
       byId('endpointNodeIds').innerHTML = state.nodes.map((node) =>
         '<option value="' + esc(node.id) + '">' + esc(node.name + ' / ' + (node.remark || node.protocol || '')) + '</option>'
       ).join('');
       markSelected(byId('endpointNodeIds'), Array.from(selected));
-      syncEndpointNodeControl();
+      const visible = visibleEndpointNodes();
+      byId('endpointNodeVisibleCount').textContent = String(visible.length);
+      byId('endpointNodeList').innerHTML = visible.map((node) => endpointNodeRowHtml(node, selected.has(node.id))).join('') || '<div class="muted small">No matching nodes.</div>';
+      updateEndpointNodeSelectedCount();
+    }
+    function endpointNodeRowHtml(node, selected) {
+      const trafficIds = trafficIdsForNode(node);
+      const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
+      return '<label class="binding-row' + (selected ? ' selected' : '') + '">' +
+        '<input type="checkbox" data-endpoint-node-id="' + esc(node.id) + '"' + (selected ? ' checked' : '') + '>' +
+        '<span class="binding-row-main"><strong>' + esc(node.name) + '</strong><span>' + esc(node.remark || node.protocol || '') + '</span></span>' +
+        '<span class="binding-row-badges"><span class="mini-badge' + (node.enabled ? ' active' : '') + '">' + esc(node.enabled ? 'enabled' : 'disabled') + '</span><span class="mini-badge">' + esc(traffic) + '</span></span>' +
+      '</label>';
+    }
+    function visibleEndpointNodes() {
+      const query = filterText('endpointNodeFilter');
+      const mode = byId('endpointNodeStatus').value;
+      return state.nodes.filter((node) => {
+        const trafficIds = trafficIdsForNode(node);
+        if (mode === 'enabled' && !node.enabled) return false;
+        if (mode === 'direct' && trafficIds.length > 0) return false;
+        if (mode === 'traffic' && trafficIds.length === 0) return false;
+        if (!query) return true;
+        return [node.name, node.remark, node.protocol].filter(Boolean).join(' ').toLowerCase().includes(query);
+      });
+    }
+    function markEndpointNodes(values) {
+      const set = new Set(values || []);
+      markSelected(byId('endpointNodeIds'), Array.from(set));
+      document.querySelectorAll('[data-endpoint-node-id]').forEach((input) => {
+        input.checked = set.has(input.dataset.endpointNodeId);
+        const row = input.closest ? input.closest('.binding-row') : null;
+        if (row) row.classList.toggle('selected', input.checked);
+      });
+      updateEndpointNodeSelectedCount();
+    }
+    function updateEndpointNodeSelectedCount() {
+      byId('endpointNodeSelectedCount').textContent = String(selectedEndpointNodeIds().length);
     }
     function endpointResolveLabel(row) {
       if (row.type !== 'domain') return '-';
@@ -792,8 +844,10 @@ export function renderAdminUi(env: Env): string {
     }
     function syncEndpointNodeControl() {
       const isExclusive = byId('endpointRole').value === 'exclusive';
+      byId('endpointNodePicker').classList.toggle('hidden', !isExclusive);
       byId('endpointNodeIds').disabled = !isExclusive;
-      if (!isExclusive) markSelected(byId('endpointNodeIds'), []);
+      if (isExclusive) renderEndpointNodeOptions();
+      else markEndpointNodes([]);
     }
     function filterText(id) {
       const el = byId(id);
@@ -1022,7 +1076,9 @@ export function renderAdminUi(env: Env): string {
       byId('endpointValues').value = '';
       byId('endpointLabel').value = '';
       byId('endpointSort').value = '0';
-      markSelected(byId('endpointNodeIds'), []);
+      byId('endpointNodeFilter').value = '';
+      byId('endpointNodeStatus').value = 'all';
+      markEndpointNodes([]);
       syncEndpointResolveModeControl();
       syncEndpointNodeControl();
     }
@@ -1175,6 +1231,12 @@ export function renderAdminUi(env: Env): string {
         if (t.checked) selected.add(t.dataset.bindingNodeId);
         else selected.delete(t.dataset.bindingNodeId);
         markBindingNodes(Array.from(selected));
+      }
+      if (t && t.dataset && t.dataset.endpointNodeId) {
+        const selected = new Set(selectedEndpointNodeIds());
+        if (t.checked) selected.add(t.dataset.endpointNodeId);
+        else selected.delete(t.dataset.endpointNodeId);
+        markEndpointNodes(Array.from(selected));
       }
       if (t && t.dataset && t.dataset.importParent) {
         const item = state.importCandidates.find((candidate) => candidate.id === t.dataset.importParent);
@@ -1372,7 +1434,7 @@ export function renderAdminUi(env: Env): string {
             byId('endpointLabel').value = row.label || '';
             byId('endpointSort').value = String(row.sort_order || 0);
             renderEndpointNodeOptions();
-            markSelected(byId('endpointNodeIds'), row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : []);
+            markEndpointNodes(row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : []);
             syncEndpointResolveModeControl();
             syncEndpointNodeControl();
           }
@@ -1427,6 +1489,10 @@ export function renderAdminUi(env: Env): string {
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
     byId('endpointType').onchange = syncEndpointResolveModeControl;
     byId('endpointRole').onchange = syncEndpointNodeControl;
+    byId('selectAllEndpointNodes').onclick = () => markEndpointNodes(unique([...selectedEndpointNodeIds(), ...visibleEndpointNodes().map((node) => node.id)]));
+    byId('clearEndpointNodes').onclick = () => markEndpointNodes([]);
+    byId('endpointNodeFilter').oninput = renderEndpointNodeOptions;
+    byId('endpointNodeStatus').onchange = renderEndpointNodeOptions;
     byId('selectAllDerived').onclick = () => markDerivedCandidates(unique([...selectedDerivedIds(), ...filteredGeneratedNodes().map((node) => node.id)]));
     byId('clearDerived').onclick = () => markDerivedCandidates([]);
     byId('groupCandidateFilter').oninput = renderGeneratedNodeOptions;
