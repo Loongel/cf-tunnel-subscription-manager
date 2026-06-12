@@ -336,7 +336,7 @@ function selectEndpoints(
   available: PreferredEndpointRow[],
   selectedByNode: Map<string, Set<string>>,
   mode: SubscriptionOptions["endpointMode"]
-): PreferredEndpointRow[] {
+): Array<PreferredEndpointRow | null> {
   if (mode === "none") return [];
   if (mode === "ip" || mode === "domain") {
     return available.filter((endpoint) => endpoint.type === mode);
@@ -345,11 +345,11 @@ function selectEndpoints(
 
   const selected = selectedByNode.get(nodeId);
   const global = available.filter((endpoint) => endpoint.scope === "global");
-  if (!selected || selected.size === 0) return global;
+  if (!selected || selected.size === 0) return [null, ...global];
   const selectedEndpoints = available.filter((endpoint) => selected.has(endpoint.id));
   const exclusive = selectedEndpoints.filter((endpoint) => endpoint.selection_mode === "exclusive");
   if (exclusive.length > 0) return exclusive;
-  return available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id));
+  return [null, ...available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id))];
 }
 
 async function resolveEndpointValues(endpoints: PreferredEndpointRow[]): Promise<PreferredEndpointRow[]> {

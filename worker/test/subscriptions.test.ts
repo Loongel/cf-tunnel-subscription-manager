@@ -135,12 +135,14 @@ describe("subscription generation", () => {
       endpointMode: "selected"
     });
 
-    expect(generated).toHaveLength(2);
+    expect(generated).toHaveLength(4);
     expect(generated.map((item) => item.id)).toEqual([
+      "node_1:direct:direct",
       "node_1:direct:endpoint_1",
+      "node_1:sni:sni_1:direct",
       "node_1:sni:sni_1:endpoint_1"
     ]);
-    const sniNode = generated[1];
+    const sniNode = generated[3];
     expect(sniNode).toMatchObject({
       id: "node_1:sni:sni_1:endpoint_1",
       sourceNodeId: "node_1",
@@ -202,19 +204,25 @@ describe("subscription generation", () => {
       endpointMode: "selected"
     });
 
-    expect(generated).toHaveLength(2);
+    expect(generated).toHaveLength(4);
     expect(generated[0]).toMatchObject({
-      id: "node_1:direct:endpoint_1",
+      id: "node_1:direct:direct",
       tunnelHost: undefined,
       trafficLabel: undefined
     });
-    expect(generated[1]).toMatchObject({
+    expect(generated[2]).toMatchObject({
+      id: "node_1:swarm:hd01|target:http://s1:80:direct",
+      tunnelId: trafficKey,
+      trafficLabel: "hd01 -> http://s1:80",
+      tunnelHost: "fresh.trycloudflare.com"
+    });
+    expect(generated[3]).toMatchObject({
       id: "node_1:swarm:hd01|target:http://s1:80:endpoint_1",
       tunnelId: trafficKey,
       trafficLabel: "hd01 -> http://s1:80",
       tunnelHost: "fresh.trycloudflare.com"
     });
-    const parsed = new URL(generated[1].uri || "");
+    const parsed = new URL(generated[3].uri || "");
     expect(parsed.hostname).toBe("104.16.0.1");
     expect(parsed.searchParams.get("sni")).toBe("fresh.trycloudflare.com");
     expect(parsed.searchParams.get("host")).toBe("fresh.trycloudflare.com");
@@ -244,12 +252,13 @@ describe("subscription generation", () => {
     });
 
     expect(fetch).toHaveBeenCalledOnce();
-    expect(generated[0]).toMatchObject({
+    const endpointNode = generated.find((item) => item.endpointId === "endpoint_domain");
+    expect(endpointNode).toMatchObject({
       endpointId: "endpoint_domain",
       endpointValue: "198.51.100.10",
       endpointLabel: "edge-domain"
     });
-    const parsed = new URL(generated[0].uri || "");
+    const parsed = new URL(endpointNode?.uri || "");
     expect(parsed.hostname).toBe("198.51.100.10");
     expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | edge-domain");
   });
@@ -291,7 +300,32 @@ describe("subscription generation", () => {
     });
 
     expect(fetch).toHaveBeenCalledOnce();
-    expect(generated.map((item) => item.endpointValue)).toEqual(["198.51.100.10", "198.51.100.10"]);
+    expect(generated.map((item) => item.endpointValue).filter(Boolean)).toEqual(["198.51.100.10", "198.51.100.10"]);
+  });
+
+  it("keeps the direct endpoint branch when additive endpoints are selected", async () => {
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_node",
+        label: "node-edge",
+        scope: "node",
+        default_selected: 0,
+        selection_mode: "additive"
+      }],
+      endpointSelections: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_node", enabled: 1 }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(generated.map((item) => item.id)).toEqual([
+      "node_1:direct:direct",
+      "node_1:direct:endpoint_node"
+    ]);
   });
 
   it("uses selected exclusive endpoints instead of global endpoints", async () => {
