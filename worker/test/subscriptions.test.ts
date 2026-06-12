@@ -8,7 +8,6 @@ type TableMap = {
   endpointSelections?: Array<{ proxy_node_id: string; endpoint_id: string; enabled: number }>;
   endpointScopes?: Array<{ proxy_node_id: string; endpoint_id: string }>;
   endpointExclusions?: Array<{ proxy_node_id: string; endpoint_id: string }>;
-  tunnelSelections?: Array<Record<string, unknown>>;
   trafficBindings?: Array<{ proxy_node_id: string; traffic_key: string; enabled: number }>;
   tunnels?: TunnelRow[];
   sniSelections?: Array<{
@@ -57,7 +56,6 @@ class MockStatement {
     if (this.query.includes("FROM preferred_endpoint_node_exclusions")) return this.tables.endpointExclusions || [];
     if (this.query.includes("FROM preferred_endpoints")) return this.tables.endpoints;
     if (this.query.includes("FROM proxy_node_traffic_bindings")) return this.tables.trafficBindings || [];
-    if (this.query.includes("FROM proxy_node_tunnel_selections")) return this.tables.tunnelSelections || [];
     if (this.query.includes("FROM tunnels")) {
       return (this.tables.tunnels || []).filter((row) => row.health_status === "healthy");
     }
@@ -91,8 +89,6 @@ function node(id: string, name: string): ProxyNodeRow {
     raw_config: "vless://00000000-0000-4000-8000-000000000000@origin.example:80?type=ws&path=%2Fapp#old",
     protocol: "vless",
     enabled: 1,
-    use_tunnel: 0,
-    selected_tunnel_id: null,
     created_at: "",
     updated_at: ""
   };
@@ -107,7 +103,6 @@ const endpoint: PreferredEndpointRow = {
   selection_mode: "additive",
   enabled: 1,
   scope: "global",
-  default_selected: 1,
   sort_order: 0,
   created_at: "",
   updated_at: ""
@@ -192,7 +187,7 @@ describe("subscription generation", () => {
   it("resolves traffic bindings by swarm node and target using only healthy tunnels", async () => {
     const trafficKey = "swarm:hd01|target:http://s1:80";
     const generated = await listGeneratedNodes(env({
-      nodes: [{ ...node("node_1", "content"), use_tunnel: 1 }],
+      nodes: [node("node_1", "content")],
       endpoints: [endpoint],
       trafficBindings: [{ proxy_node_id: "node_1", traffic_key: trafficKey, enabled: 1 }],
       tunnels: [
@@ -289,7 +284,6 @@ describe("subscription generation", () => {
           value: "edge.example.com",
           label: "node-edge",
           scope: "node",
-          default_selected: 0,
           resolve_mode: "ipv4"
         }
       ],
@@ -313,7 +307,6 @@ describe("subscription generation", () => {
         id: "endpoint_node",
         label: "node-edge",
         scope: "node",
-        default_selected: 0,
         selection_mode: "additive"
       }],
       endpointSelections: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_node", enabled: 1 }]
@@ -360,7 +353,6 @@ describe("subscription generation", () => {
           value: "192.0.2.10",
           label: "exclusive-ip",
           scope: "node",
-          default_selected: 0,
           selection_mode: "exclusive"
         }
       ],
@@ -391,7 +383,6 @@ describe("subscription generation", () => {
           value: "192.0.2.20",
           label: "exclusive-scope",
           scope: "node",
-          default_selected: 0,
           selection_mode: "exclusive"
         }
       ],

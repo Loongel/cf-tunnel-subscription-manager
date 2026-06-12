@@ -324,21 +324,14 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
     `SELECT n.*,
        COALESCE(s.name, n.name) AS name,
        COALESCE(s.remark, n.remark) AS remark,
-       COALESCE(s.enabled, n.enabled) AS enabled,
-       t.public_hostname AS tunnel_public_hostname,
-       t.public_url AS tunnel_public_url
+       COALESCE(s.enabled, n.enabled) AS enabled
      FROM proxy_nodes n
      LEFT JOIN proxy_node_mutable_state s ON s.import_key = n.import_key
-     LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
      ORDER BY n.name`
   );
   const selections = await all<{ proxy_node_id: string; endpoint_id: string }>(
     env.DB,
     "SELECT proxy_node_id, endpoint_id FROM proxy_node_endpoint_selections WHERE enabled = 1"
-  );
-  const tunnelSelections = await all<{ proxy_node_id: string; tunnel_id: string }>(
-    env.DB,
-    "SELECT proxy_node_id, tunnel_id FROM proxy_node_tunnel_selections WHERE enabled = 1"
   );
   const trafficBindings = await all<{ proxy_node_id: string; traffic_key: string }>(
     env.DB,
@@ -351,7 +344,6 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
   return rows.map((row) => ({
     ...row,
     selectedEndpointIds: selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.endpoint_id),
-    selectedTunnelIds: selectedTunnelIdsForRow(row, tunnelSelections),
     selectedTrafficKeys: trafficBindings.filter((item) => item.proxy_node_id === row.id).map((item) => item.traffic_key),
     selectedSniIds: sniSelections.filter((item) => item.proxy_node_id === row.id).map((item) => item.sni_id),
     selectedTrafficIds: [
@@ -361,31 +353,19 @@ async function listProxyNodes(env: Env): Promise<unknown[]> {
   }));
 }
 
-function selectedTunnelIdsForRow(
-  row: ProxyNodeRow,
-  selections: Array<{ proxy_node_id: string; tunnel_id: string }>
-): string[] {
-  const ids = selections.filter((item) => item.proxy_node_id === row.id).map((item) => item.tunnel_id);
-  if (ids.length > 0) return ids;
-  return row.selected_tunnel_id ? [row.selected_tunnel_id] : [];
-}
-
 async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow | null> {
   const id = optionalString(body.id) || makeId("node");
   const name = requiredString(body.name, "name");
   const rawConfig = requiredString(body.rawConfig, "rawConfig");
   const sourceType = optionalString(body.sourceType) || "v2ray_uri";
   const protocol = optionalString(body.protocol) || inferProtocol(rawConfig, sourceType);
-  const selectedTunnelIds = selectedTunnelIdsFromBody(body);
-  const selectedTrafficKeys = selectedTrafficKeysFromBody(body);
-  const selectedSniIds = selectedSniIdsFromBody(body);
   const timestamp = nowIso();
   await run(
     env.DB,
     `INSERT INTO proxy_nodes
       (id, name, remark, source_type, raw_config, import_key, import_source_name, raw_config_hash,
-       protocol, enabled, use_tunnel, selected_tunnel_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       protocol, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     name,
     optionalString(body.remark),
@@ -396,10 +376,6 @@ async function createProxyNode(env: Env, body: JsonRecord): Promise<ProxyNodeRow
     optionalString(body.rawConfigHash),
     protocol,
     boolToInt(body.enabled, true),
-    body.useTunnel === undefined
-      ? boolToInt(selectedTunnelIds.length > 0 || selectedTrafficKeys.length > 0 || selectedSniIds.length > 0)
-      : boolToInt(body.useTunnel),
-    selectedTunnelIds[0] || null,
     timestamp,
     timestamp
   );
@@ -1404,7 +1380,7 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     `UPDATE proxy_nodes SET
       name = ?, remark = ?, source_type = ?, raw_config = ?,
       import_key = ?, import_source_name = ?, raw_config_hash = ?, protocol = ?,
-      enabled = ?, use_tunnel = ?, selected_tunnel_id = ?, updated_at = ?
+      enabled = ?, updated_at = ?
      WHERE id = ?`,
     optionalString(body.name) || current.name,
     body.remark === null ? null : optionalString(body.remark) || current.remark,
@@ -1415,13 +1391,6 @@ async function updateProxyNode(env: Env, id: string, body: JsonRecord): Promise<
     body.rawConfigHash === undefined ? current.raw_config_hash || null : optionalString(body.rawConfigHash),
     optionalString(body.protocol) || inferProtocol(rawConfig, sourceType),
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
-    body.useTunnel === undefined ? current.use_tunnel : boolToInt(body.useTunnel),
-    body.selectedTunnelIds === undefined
-      && body.selectedTrafficIds === undefined
-      && body.selectedTrafficKeys === undefined
-      && body.selectedTunnelId === undefined
-      ? current.selected_tunnel_id
-      : firstSelectedTunnelId(body),
     nowIso(),
     id
   );
@@ -1479,10 +1448,8 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       );
     }
   }
-  if (Array.isArray(body.selectedTunnelIds)
-    || Array.isArray(body.selectedTrafficKeys)
-    || Array.isArray(body.selectedTrafficIds)
-    || body.selectedTunnelId !== undefined) {
+  if (Array.isArray(body.selectedTrafficKeys)
+    || Array.isArray(body.selectedTrafficIds)) {
     const trafficKeys = selectedTrafficKeysFromBody(body);
     await run(env.DB, "DELETE FROM proxy_node_traffic_bindings WHERE proxy_node_id = ?", nodeId);
     for (const trafficKey of trafficKeys) {
@@ -1528,23 +1495,6 @@ async function additiveNodeScopedEndpointIds(env: Env, values: unknown[]): Promi
   return ids.filter((id) => allowed.has(id));
 }
 
-function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
-  const raw = body.selectedTunnelIds;
-  const ids = Array.isArray(raw)
-    ? raw.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim())
-    : [];
-  const traffic = body.selectedTrafficIds;
-  if (Array.isArray(traffic)) {
-    ids.push(...traffic
-      .filter((id): id is string => typeof id === "string" && id.startsWith("tunnel:"))
-      .map((id) => id.slice("tunnel:".length).trim())
-      .filter(Boolean));
-  }
-  const single = optionalString(body.selectedTunnelId);
-  if (single) ids.unshift(single);
-  return Array.from(new Set(ids));
-}
-
 function selectedTrafficKeysFromBody(body: JsonRecord): string[] {
   const raw = body.selectedTrafficKeys;
   const keys = Array.isArray(raw)
@@ -1556,17 +1506,6 @@ function selectedTrafficKeysFromBody(body: JsonRecord): string[] {
       .filter((id): id is string => typeof id === "string" && id.startsWith("traffic:"))
       .map((id) => id.slice("traffic:".length).trim())
       .filter(Boolean));
-  }
-  // Support legacy cached UI clients
-  const legacyTunnels = body.selectedTunnelIds;
-  if (Array.isArray(legacyTunnels)) {
-    keys.push(...legacyTunnels
-      .filter((id): id is string => typeof id === "string" && id.startsWith("tunnel:"))
-      .map((id) => id.slice("tunnel:".length).trim())
-      .filter(Boolean));
-  }
-  if (typeof body.selectedTunnelId === "string" && body.selectedTunnelId.trim() !== "") {
-    if (!keys.includes(body.selectedTunnelId.trim())) keys.push(body.selectedTunnelId.trim());
   }
   return Array.from(new Set(keys));
 }
@@ -1584,10 +1523,6 @@ function selectedSniIdsFromBody(body: JsonRecord): string[] {
       .filter(Boolean));
   }
   return Array.from(new Set(ids));
-}
-
-function firstSelectedTunnelId(body: JsonRecord): string | null {
-  return selectedTunnelIdsFromBody(body)[0] || null;
 }
 
 async function listPreferredEndpoints(env: Env): Promise<unknown[]> {
@@ -1636,15 +1571,12 @@ async function createPreferredEndpointForValue(
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
-        label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, default_selected = ?, sort_order = ?, updated_at = ?
+        label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
       resolveMode,
       selectionMode,
       body.enabled === undefined ? existing.enabled : boolToInt(body.enabled, true),
-      body.defaultSelected === undefined
-        ? existing.default_selected
-        : boolToInt(body.defaultSelected),
       intOrNull(body.sortOrder) ?? existing.sort_order,
       timestamp,
       existing.id
@@ -1658,8 +1590,8 @@ async function createPreferredEndpointForValue(
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
-      (id, type, value, label, resolve_mode, selection_mode, enabled, scope, default_selected, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, type, value, label, resolve_mode, selection_mode, enabled, scope, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     type,
     value,
@@ -1668,7 +1600,6 @@ async function createPreferredEndpointForValue(
     selectionMode,
     boolToInt(body.enabled, true),
     scope,
-    boolToInt(body.defaultSelected),
     intOrNull(body.sortOrder) || 0,
     timestamp,
     timestamp
@@ -1690,7 +1621,7 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
   await run(
     env.DB,
     `UPDATE preferred_endpoints SET
-      type = ?, value = ?, label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, scope = ?, default_selected = ?, sort_order = ?, updated_at = ?
+      type = ?, value = ?, label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, scope = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
     type,
     optionalString(body.value) || current.value,
@@ -1699,9 +1630,6 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
     selectionMode,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     scope,
-    body.defaultSelected === undefined
-      ? current.default_selected
-      : boolToInt(body.defaultSelected),
     intOrNull(body.sortOrder) ?? current.sort_order,
     nowIso(),
     id

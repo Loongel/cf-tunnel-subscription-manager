@@ -1745,7 +1745,6 @@ export function renderAdminUi(env: Env): string {
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
-            useTunnel: selectedTrafficIds.length > 0,
             selectedTrafficIds,
             ...(endpointNodeIds.has(id) ? { selectedEndpointIds } : {})
           })
@@ -1795,7 +1794,6 @@ export function renderAdminUi(env: Env): string {
           label: byId('endpointLabel').value,
           scope: role === 'exclusive' ? 'node' : role,
           selectionMode: role === 'exclusive' ? 'exclusive' : 'additive',
-          defaultSelected: role === 'global',
           enabled: byId('endpointEnabled').value === 'true',
           sortOrder: Number(byId('endpointSort').value || 0),
           proxyNodeIds: role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : [],

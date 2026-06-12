@@ -93,7 +93,6 @@ cd /root/builds/cf-tunnel-subscription-manager/worker
 export CLOUDFLARE_ACCOUNT_ID=<account id>
 export CLOUDFLARE_API_TOKEN=<token with D1 access>
 npx wrangler d1 execute cf-tunnel-control-plane --remote --command "
-DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE name LIKE '\''demo-%'\'');
 DELETE FROM groups WHERE name LIKE '\''demo-%'\'';
 DELETE FROM proxy_node_endpoint_selections WHERE proxy_node_id IN (SELECT id FROM proxy_nodes WHERE name LIKE '\''demo-%'\'');
 DELETE FROM proxy_nodes WHERE name LIKE '\''demo-%'\'';

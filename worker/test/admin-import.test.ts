@@ -49,8 +49,6 @@ class MockStatement {
         rawConfigHash,
         protocol,
         enabled,
-        useTunnel,
-        selectedTunnelId,
         createdAt,
         updatedAt
       ] = this.params;
@@ -65,8 +63,6 @@ class MockStatement {
         raw_config_hash: typeof rawConfigHash === "string" ? rawConfigHash : null,
         protocol: String(protocol),
         enabled: Number(enabled),
-        use_tunnel: Number(useTunnel),
-        selected_tunnel_id: typeof selectedTunnelId === "string" ? selectedTunnelId : null,
         created_at: String(createdAt),
         updated_at: String(updatedAt)
       });
@@ -250,8 +246,6 @@ function node(id: string, name: string, remark: string, rawConfig: string, rawHa
     raw_config_hash: rawHash,
     protocol: "vless",
     enabled: 1,
-    use_tunnel: 0,
-    selected_tunnel_id: null,
     created_at: "",
     updated_at: ""
   };
@@ -272,7 +266,6 @@ describe("admin import refresh", () => {
           selection_mode: "additive",
           enabled: 1,
           scope: "node",
-          default_selected: 0,
           sort_order: 0,
           created_at: "",
           updated_at: ""
@@ -286,7 +279,6 @@ describe("admin import refresh", () => {
           selection_mode: "additive",
           enabled: 1,
           scope: "global",
-          default_selected: 1,
           sort_order: 0,
           created_at: "",
           updated_at: ""
@@ -332,7 +324,6 @@ describe("admin import refresh", () => {
         selection_mode: "exclusive",
         enabled: 1,
         scope: "node",
-        default_selected: 0,
         sort_order: 0,
         created_at: "",
         updated_at: ""
@@ -381,7 +372,6 @@ describe("admin import refresh", () => {
         selection_mode: "additive",
         enabled: 1,
         scope: "global",
-        default_selected: 1,
         sort_order: 0,
         created_at: "",
         updated_at: ""
@@ -444,8 +434,7 @@ describe("admin import refresh", () => {
     expect(tables.nodes[0]).toMatchObject({
       name: "custom alias",
       remark: "custom remark",
-      enabled: 0,
-      use_tunnel: 1
+      enabled: 0
     });
     expect(tables.trafficBindings).toEqual([
       { proxy_node_id: tables.nodes[0].id, traffic_key: "swarm:hd01|target:http://s1:80", enabled: 1 }

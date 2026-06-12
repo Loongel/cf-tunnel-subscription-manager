@@ -127,12 +127,9 @@ async function loadNodes(env: Env, options: SubscriptionOptions): Promise<ProxyN
     `SELECT n.*,
        COALESCE(s.name, n.name) AS name,
        COALESCE(s.remark, n.remark) AS remark,
-       COALESCE(s.enabled, n.enabled) AS enabled,
-       t.public_hostname AS tunnel_public_hostname,
-       t.public_url AS tunnel_public_url
+       COALESCE(s.enabled, n.enabled) AS enabled
      FROM proxy_nodes n
      LEFT JOIN proxy_node_mutable_state s ON s.import_key = n.import_key
-     LEFT JOIN tunnels t ON t.id = n.selected_tunnel_id
      WHERE 1 = 1 ${enabledClause}
      ORDER BY n.name`
   );
@@ -290,10 +287,8 @@ function selectedTrafficForNode(
   const output: Array<{ id: string; sniId?: string; hostname: string | null; label?: string }> = [
     { id: "direct", hostname: null }
   ];
-  if (node.use_tunnel) {
-    for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
-      output.push({ id: tunnel.traffic_key, hostname: tunnel.public_hostname, label: tunnel.traffic_label });
-    }
+  for (const tunnel of selectedTunnelsForNode(node, tunnelsByNode)) {
+    output.push({ id: tunnel.traffic_key, hostname: tunnel.public_hostname, label: tunnel.traffic_label });
   }
   for (const sni of snisByNode.get(node.id) || []) {
     output.push({ id: `sni:${sni.sni_id}`, sniId: sni.sni_id, hostname: sni.hostname, label: sni.sni_remark || sni.sni_name });

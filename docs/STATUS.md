@@ -63,8 +63,9 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Admin UI browser test passed with Playwright on `hd01`: wrong token feedback, correct login, endpoint creation, proxy node creation, and subscription preview generation
 - Admin UI Chromium smoke passed on 2026-06-11 after layout cleanup: authenticated page no longer shows stale public-status notice, Proxy Nodes endpoint counts reflect loaded global endpoints, and Saved Groups chips render compactly.
 - Endpoint-binding regression test passed: refreshing imported nodes preserves node-scoped endpoint selections for future refreshes.
-- Code audit cleanup passed on 2026-06-12: import refresh now preserves global endpoint exclusions, Group member selection survives filtering/re-rendering, subscription copy chips are visually distinct from selectable chips, and Proxy Nodes expose explicit Edit/Bind actions.
-- Worker deployed version `5f407d8c-5ce2-46e1-b923-3d53afe05c91`
+- Code audit cleanup passed on 2026-06-12: import refresh now preserves global endpoint exclusions; Group member selection survives filtering/re-rendering; subscription copy chips are visually distinct from selectable chips; Proxy Nodes expose explicit Edit/Bind actions; old tunnel-id binding compatibility and redundant endpoint defaults were removed.
+- D1 cleanup migration `0012_remove_legacy_binding_fields.sql` was applied remotely; remote schema no longer has `group_members`, `proxy_node_tunnel_selections`, `proxy_nodes.use_tunnel`, `proxy_nodes.selected_tunnel_id`, or `preferred_endpoints.default_selected`.
+- Worker deployed version `8fd4ef4f-ef9f-4592-8252-0916256016e5`
 - Public agent image `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` was published by GitHub Actions, anonymously pulled, and verified to report `cloudflared version 2026.6.0`
 - Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`

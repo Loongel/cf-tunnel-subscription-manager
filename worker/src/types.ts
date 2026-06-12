@@ -80,12 +80,8 @@ export interface ProxyNodeRow {
   raw_config_hash?: string | null;
   protocol: string;
   enabled: number;
-  use_tunnel: number;
-  selected_tunnel_id: string | null;
   created_at: string;
   updated_at: string;
-  tunnel_public_hostname?: string | null;
-  tunnel_public_url?: string | null;
 }
 
 export interface PreferredEndpointRow {
@@ -97,7 +93,6 @@ export interface PreferredEndpointRow {
   selection_mode: "additive" | "exclusive";
   enabled: number;
   scope: "global" | "node";
-  default_selected: number;
   sort_order: number;
   created_at: string;
   updated_at: string;

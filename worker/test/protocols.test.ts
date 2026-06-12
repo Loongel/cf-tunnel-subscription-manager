@@ -13,8 +13,6 @@ function node(raw: string): ProxyNodeRow {
     raw_config: raw,
     protocol: "vless",
     enabled: 1,
-    use_tunnel: 1,
-    selected_tunnel_id: "tun_1",
     created_at: "",
     updated_at: ""
   };
@@ -29,7 +27,6 @@ const endpoint: PreferredEndpointRow = {
   selection_mode: "additive",
   enabled: 1,
   scope: "global",
-  default_selected: 1,
   sort_order: 0,
   created_at: "",
   updated_at: ""
@@ -54,7 +51,7 @@ describe("protocol adapter", () => {
   it("forces endpoint-derived VLESS output to port 443 without tunnel binding", () => {
     const raw = "vless://uuid@example.com:1443?type=ws&security=tls&sni=edge.example.com&host=edge.example.com&path=%2F#old";
     const result = mutateShareUri(raw, {
-      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw) },
       endpoint,
       format: "v2ray"
     });
@@ -68,7 +65,7 @@ describe("protocol adapter", () => {
   it("wraps IPv6 endpoint addresses in share-link URL authority hosts", () => {
     const raw = "vless://uuid@3xui.ora1.813711.xyz:1443?type=xhttp&security=tls&sni=v6.3xui.hk&host=v6.3xui.hk&path=%2F#old";
     const result = mutateShareUri(raw, {
-      node: { ...node(raw), name: "vlessxhttp[fallback]-direct-out@usr", use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw), name: "vlessxhttp[fallback]-direct-out@usr" },
       endpoint: { ...endpoint, value: "2400:3200::1", label: "v6.3xui.hk" },
       format: "v2ray"
     });
@@ -83,7 +80,7 @@ describe("protocol adapter", () => {
   it("selects SNI deterministically for direct, endpoint-derived, and configured traffic nodes", () => {
     const raw = "vless://uuid@example.com:443?type=ws&security=tls&sni=first.example.com,second.example.com&host=first.example.com,second.example.com&path=%2F#old";
     const direct = mutateShareUri(raw, {
-      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw) },
       format: "v2ray"
     });
     const directUrl = new URL(direct.uri || "");
@@ -92,7 +89,7 @@ describe("protocol adapter", () => {
     expect(directUrl.searchParams.get("host")).toBe("first.example.com");
 
     const endpointDerived = mutateShareUri(raw, {
-      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw) },
       endpoint,
       format: "v2ray"
     });
@@ -103,7 +100,7 @@ describe("protocol adapter", () => {
     expect(endpointUrl.searchParams.get("host")).toBe("second.example.com");
 
     const configured = mutateShareUri(raw, {
-      node: { ...node(raw), use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw) },
       tunnelHost: "configured.example.com",
       endpoint,
       format: "v2ray"
@@ -151,7 +148,7 @@ describe("protocol adapter", () => {
       tls: { enabled: true, server_name: "edge.example.com" }
     });
     const result = toSingBoxOutbound(raw, {
-      node: { ...node(raw), source_type: "sing_box_outbound", protocol: "sing-box", use_tunnel: 0, selected_tunnel_id: null },
+      node: { ...node(raw), source_type: "sing_box_outbound", protocol: "sing-box" },
       endpoint,
       format: "sing-box"
     });

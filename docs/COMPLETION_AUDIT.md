@@ -56,7 +56,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - D1 cleanup of runtime test rows
 - Playwright browser test for admin UI login/config/preview flow
 - Chromium admin UI smoke for 2026-06-11 layout/notice cleanup
-- Code audit cleanup on 2026-06-12: preserved global endpoint exclusions across import refresh, moved group member selection state out of transient DOM chips, removed a dead preferred-endpoint wrapper, and kept schema cleanup candidates deferred.
+- Code audit cleanup on 2026-06-12: preserved global endpoint exclusions across import refresh, moved group member selection state out of transient DOM chips, removed a dead preferred-endpoint wrapper, removed old tunnel-id binding compatibility, and applied schema cleanup migration `0012`.
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns
@@ -66,12 +66,12 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Deploy the production Swarm stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.
 - Keep the old Worker until critical data has been migrated and the new deployment passes the cutover checks in `docs/DEPLOYMENT.md`.
 
-## Deferred Cleanup Candidates
+## Cleanup Audit
 
-These items were reviewed during the 2026-06-12 code audit and intentionally left in place because they sit on migration or API compatibility boundaries:
+The 2026-06-12 cleanup removed runtime compatibility paths for the old tunnel-id binding model:
 
-- `group_members`: early group-membership schema; current groups use derived-node filters in `groups.endpoint_filter_json`.
-- `proxy_nodes.selected_tunnel_id` and `proxy_node_tunnel_selections`: legacy tunnel binding compatibility; current traffic binding uses stable `proxy_node_traffic_bindings.traffic_key`.
-- `preferred_endpoints.default_selected`: retained schema field from the original endpoint model.
-- `proxy_nodes.raw_config_hash`: retained import metadata useful for diagnostics and future duplicate audits.
-- `proxy_nodes.import_key`: should be audited for duplicates before any future unique constraint migration.
+- Removed runtime reads/writes for `proxy_nodes.use_tunnel`, `proxy_nodes.selected_tunnel_id`, and `proxy_node_tunnel_selections`.
+- Removed runtime reads/writes for `preferred_endpoints.default_selected`.
+- Added migration `0012_remove_legacy_binding_fields.sql` to drop `group_members`, `proxy_node_tunnel_selections`, `proxy_nodes.use_tunnel`, `proxy_nodes.selected_tunnel_id`, and `preferred_endpoints.default_selected`.
+- Kept `proxy_nodes.raw_config_hash` as active import metadata for diagnostics and duplicate audits.
+- Left `proxy_nodes.import_key` indexed rather than unique until live data is explicitly audited for duplicate import identities.

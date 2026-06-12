@@ -364,8 +364,7 @@ http://s2:2096 https://another.trycloudflare.com
 | `raw_config` | 原始节点信息。 |
 | `protocol` | `vless/vmess/trojan/shadowsocks/http/unknown`。 |
 | `enabled` | 是否启用。 |
-| `use_tunnel` | 是否通过 Cloudflare tunnel 连接。 |
-| `selected_tunnel_id` | 选中的 tunnel。 |
+| `import_key/import_source_name/raw_config_hash` | 导入身份和来源元数据。 |
 | `created_at/updated_at` | 审计时间。 |
 
 `preferred_endpoints`
@@ -378,7 +377,8 @@ http://s2:2096 https://another.trycloudflare.com
 | `label` | 展示名。 |
 | `enabled` | 是否启用。 |
 | `scope` | `global/node`。`global` 对所有节点可见，`node` 只对指定节点可见。 |
-| `default_selected` | 新节点是否默认选用该 endpoint。 |
+| `selection_mode` | `additive/exclusive`，排他 endpoint 会覆盖该节点的其他 endpoint 派生。 |
+| `resolve_mode` | 域名 endpoint 是否在订阅输出时解析为 IPv4/IPv6。 |
 | `sort_order` | 排序。 |
 
 `preferred_endpoint_node_scopes`
@@ -403,13 +403,11 @@ http://s2:2096 https://another.trycloudflare.com
 - 每个代理节点在配置页里可以从“全局可见 + 本节点可见”的 endpoint 中多选。
 - 未选择任何 endpoint 时，该节点只输出原始/隧道 host 节点，不做优选 IP/域名派生，具体行为可在 UI 上提示。
 
-`groups` / `group_members`
+`groups`
 
-- 用于把原始节点或派生节点规则放进订阅分组。
-- 第一版必须支持原始节点级分组：一个 `proxy_node` 属于一个或多个 group，派生出来的 endpoint 节点默认继承这些 group。
-- 第一版同时预留 endpoint 过滤规则：group 可选择只包含某些 endpoint 类型或 endpoint ID，例如只包含优选 IP、不包含优选域名。
-- 第一版实现分组级 `endpoint_mode`：当订阅 URL 使用 `group=` 且没有显式传 `endpointMode` 时，使用分组保存的模式。
-- 如果后续需要精细到每一个生成节点单独分组，再增加 generated-node 级别记录。
+- 用于把具体派生节点规则放进订阅分组。
+- 分组成员保存在 `groups.endpoint_filter_json` 的 `derivedNodeIds` 中。
+- 支持分组级 `endpoint_mode`：当订阅 URL 使用 `group=` 且没有显式传 `endpointMode` 时，使用分组保存的模式。
 
 `tunnel_events`
 
@@ -502,7 +500,7 @@ https://abc.trycloudflare.com -> http://s1:2095
 优选域名: cf.example.com
 ```
 
-当某个 `proxy_node.use_tunnel = true` 且选择了某个 tunnel：
+当某个 `proxy_node` 通过 `proxy_node_traffic_bindings.traffic_key` 绑定了健康 tunnel：
 
 - 真实服务入口 host 使用 `tunnel.public_hostname` 作为 TLS SNI / HTTP Host / WebSocket Host 等“Cloudflare 需要转发到的 host”。
 - 客户端连接地址可以派生为多个被该节点选中的优选 IP 或优选域名。
@@ -673,7 +671,7 @@ UI 目标是“运维控制台”，不是营销页。信息应紧凑、可扫�
 - `Global` 标签页录入全局 endpoint，对所有代理节点可见。
 - `Node-specific` 标签页录入节点级 endpoint，并可批量分配给一个或多个代理节点。
 - 代理节点配置页最终决定“该节点实际选用哪些 endpoint”。
-- 新节点默认选中 `default_selected = true` 的全局 endpoint。
+- 全局 endpoint 默认参与所有节点派生，除非该 endpoint 配置了排除节点；排他 endpoint 会覆盖该节点的其他 endpoint。
 
 ### 8.6 Subscriptions 草图
 
