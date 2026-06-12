@@ -10,6 +10,11 @@ interface SelectionRow {
   enabled: number;
 }
 
+interface EndpointExclusionRow {
+  endpoint_id: string;
+  proxy_node_id: string;
+}
+
 interface TunnelSelectionRow {
   proxy_node_id: string;
   traffic_key: string;
@@ -139,7 +144,7 @@ export async function listGeneratedNodes(env: Env, options: SubscriptionOptions)
 
 async function generateNodes(env: Env, options: SubscriptionOptions): Promise<GeneratedNode[]> {
   const effectiveOptions = await withGroupDefaults(env, options);
-  const [nodes, rawEndpoints, selections, trafficBindings, healthyTunnels, sniSelections, groupFilter] = await Promise.all([
+  const [nodes, rawEndpoints, selections, endpointExclusions, trafficBindings, healthyTunnels, sniSelections, groupFilter] = await Promise.all([
     loadNodes(env, effectiveOptions),
     all<PreferredEndpointRow>(
       env.DB,
@@ -157,6 +162,14 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
        WHERE e.enabled = 1
          AND e.scope = 'node'
          AND e.selection_mode = 'exclusive'`
+    ),
+    all<EndpointExclusionRow>(
+      env.DB,
+      `SELECT x.proxy_node_id, x.endpoint_id
+       FROM preferred_endpoint_node_exclusions x
+       JOIN preferred_endpoints e ON e.id = x.endpoint_id
+       WHERE e.enabled = 1
+         AND e.scope = 'global'`
     ),
     all<TrafficBindingRow>(
       env.DB,
@@ -191,6 +204,12 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     set.add(selection.endpoint_id);
     selectedByNode.set(selection.proxy_node_id, set);
   }
+  const excludedByEndpoint = new Map<string, Set<string>>();
+  for (const exclusion of endpointExclusions) {
+    const set = excludedByEndpoint.get(exclusion.endpoint_id) || new Set<string>();
+    set.add(exclusion.proxy_node_id);
+    excludedByEndpoint.set(exclusion.endpoint_id, set);
+  }
 
   const latestTunnelByTrafficKey = latestHealthyTunnelsByTrafficKey(healthyTunnels);
   const tunnelsByNode = new Map<string, TunnelSelectionRow[]>();
@@ -218,7 +237,12 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
 
   const output: GeneratedNode[] = [];
   for (const node of nodes) {
-    const selected = selectEndpoints(node.id, endpoints, selectedByNode, effectiveOptions.endpointMode);
+    const selected = selectEndpoints(
+      node.id,
+      endpointsForNode(node.id, endpoints, excludedByEndpoint),
+      selectedByNode,
+      effectiveOptions.endpointMode
+    );
 
     const selectedTraffic = selectedTrafficForNode(node, tunnelsByNode, snisByNode);
     if (selectedTraffic.length === 0) {
@@ -246,6 +270,16 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
     }
   }
   return filterGeneratedByGroup(output, groupFilter);
+}
+
+function endpointsForNode(
+  nodeId: string,
+  endpoints: PreferredEndpointRow[],
+  excludedByEndpoint: Map<string, Set<string>>
+): PreferredEndpointRow[] {
+  return endpoints.filter((endpoint) =>
+    endpoint.scope !== "global" || !excludedByEndpoint.get(endpoint.id)?.has(nodeId)
+  );
 }
 
 function selectedTrafficForNode(

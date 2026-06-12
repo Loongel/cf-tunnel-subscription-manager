@@ -7,6 +7,7 @@ type TableMap = {
   endpoints: PreferredEndpointRow[];
   endpointSelections?: Array<{ proxy_node_id: string; endpoint_id: string; enabled: number }>;
   endpointScopes?: Array<{ proxy_node_id: string; endpoint_id: string }>;
+  endpointExclusions?: Array<{ proxy_node_id: string; endpoint_id: string }>;
   tunnelSelections?: Array<Record<string, unknown>>;
   trafficBindings?: Array<{ proxy_node_id: string; traffic_key: string; enabled: number }>;
   tunnels?: TunnelRow[];
@@ -53,6 +54,7 @@ class MockStatement {
       }
       return rows;
     }
+    if (this.query.includes("FROM preferred_endpoint_node_exclusions")) return this.tables.endpointExclusions || [];
     if (this.query.includes("FROM preferred_endpoints")) return this.tables.endpoints;
     if (this.query.includes("FROM proxy_node_traffic_bindings")) return this.tables.trafficBindings || [];
     if (this.query.includes("FROM proxy_node_tunnel_selections")) return this.tables.tunnelSelections || [];
@@ -325,6 +327,25 @@ describe("subscription generation", () => {
     expect(generated.map((item) => item.id)).toEqual([
       "node_1:direct:direct",
       "node_1:direct:endpoint_node"
+    ]);
+  });
+
+  it("excludes global endpoints from configured nodes", async () => {
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content-a"), node("node_2", "content-b")],
+      endpoints: [endpoint],
+      endpointExclusions: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_1" }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(generated.map((item) => item.id)).toEqual([
+      "node_1:direct:direct",
+      "node_2:direct:direct",
+      "node_2:direct:endpoint_1"
     ]);
   });
 

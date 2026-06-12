@@ -1548,9 +1548,11 @@ function firstSelectedTunnelId(body: JsonRecord): string | null {
 async function listPreferredEndpoints(env: Env): Promise<unknown[]> {
   const endpoints = await all<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints ORDER BY sort_order, value");
   const scopes = await all<{ endpoint_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM preferred_endpoint_node_scopes");
+  const exclusions = await all<{ endpoint_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM preferred_endpoint_node_exclusions");
   return endpoints.map((endpoint) => ({
     ...endpoint,
-    proxyNodeIds: scopes.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id)
+    proxyNodeIds: scopes.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id),
+    excludedProxyNodeIds: exclusions.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id)
   }));
 }
 
@@ -1607,6 +1609,7 @@ async function createPreferredEndpointForValue(
       existing.id
     );
     await replaceEndpointScopes(env, existing.id, body);
+    await replaceEndpointExclusions(env, existing.id, body);
     return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", existing.id) };
   }
 
@@ -1630,6 +1633,7 @@ async function createPreferredEndpointForValue(
     timestamp
   );
   await replaceEndpointScopes(env, id, body);
+  await replaceEndpointExclusions(env, id, body);
   return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id) };
 }
 
@@ -1662,6 +1666,7 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
     id
   );
   await replaceEndpointScopes(env, id, body);
+  await replaceEndpointExclusions(env, id, body);
   return await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id);
 }
 
@@ -1726,6 +1731,24 @@ async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRec
          AND proxy_node_id IN (${placeholders})`,
       endpointId,
       ...scopedIds
+    );
+  }
+}
+
+async function replaceEndpointExclusions(env: Env, endpointId: string, body: JsonRecord): Promise<void> {
+  if (!Array.isArray(body.excludedProxyNodeIds)) return;
+  const endpoint = await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", endpointId);
+  await run(env.DB, "DELETE FROM preferred_endpoint_node_exclusions WHERE endpoint_id = ?", endpointId);
+  if (endpoint?.scope !== "global") return;
+  const nodeIds = Array.from(new Set(body.excludedProxyNodeIds
+    .filter((nodeId): nodeId is string => typeof nodeId === "string" && nodeId.trim() !== "")
+    .map((nodeId) => nodeId.trim())));
+  for (const nodeId of nodeIds) {
+    await run(
+      env.DB,
+      "INSERT OR IGNORE INTO preferred_endpoint_node_exclusions (endpoint_id, proxy_node_id) VALUES (?, ?)",
+      endpointId,
+      nodeId
     );
   }
 }

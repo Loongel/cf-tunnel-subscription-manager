@@ -417,7 +417,7 @@ export function renderAdminUi(env: Env): string {
           <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
           <div id="endpointNodePicker" class="subpanel full hidden">
             <div class="toolbar">
-              <h3>Exclusive Nodes</h3>
+              <h3 id="endpointNodePickerTitle">Exclusive Nodes</h3>
               <div class="small muted"><span id="endpointNodeSelectedCount" class="count">0</span> selected / <span id="endpointNodeVisibleCount" class="count">0</span> visible</div>
               <div class="actions"><button id="selectAllEndpointNodes" type="button" class="subtle">Select All</button><button id="clearEndpointNodes" type="button" class="subtle">Clear</button></div>
             </div>
@@ -653,7 +653,7 @@ export function renderAdminUi(env: Env): string {
       nodesBody.innerHTML = state.nodes.map((row) => {
         const trafficIds = trafficIdsForNode(row);
         const path = trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
-        const endpointText = globalEndpointCount() + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional';
+        const endpointText = globalEndpointsForNode(row).length + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional';
         return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
     }
@@ -694,9 +694,16 @@ export function renderAdminUi(env: Env): string {
     }
 
     function globalEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope === 'global'); }
+    function globalEndpointsForNode(node) {
+      return globalEndpoints().filter((e) => !(e.excludedProxyNodeIds || []).includes(node.id));
+    }
+    function globalEndpointsForBinding() {
+      const nodes = selectedBindingNodes();
+      if (nodes.length === 0) return globalEndpoints();
+      return globalEndpoints().filter((e) => nodes.every((node) => !(e.excludedProxyNodeIds || []).includes(node.id)));
+    }
     function exclusiveEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global' && e.selection_mode === 'exclusive'); }
     function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global' && e.selection_mode !== 'exclusive'); }
-    function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
       const selected = new Set(selectedValues(byId('bindingTraffic')));
       const query = filterText('bindingTrafficFilter');
@@ -770,7 +777,7 @@ export function renderAdminUi(env: Env): string {
     function bindingNodeRowHtml(node, selected) {
       const trafficIds = trafficIdsForNode(node);
       const traffic = trafficIds.length ? trafficIds.length + ' traffic' : 'direct';
-      const endpoints = globalEndpointCount() + '+' + ((node.selectedEndpointIds || []).length);
+      const endpoints = globalEndpointsForNode(node).length + '+' + ((node.selectedEndpointIds || []).length);
       return '<label class="binding-row' + (selected ? ' selected' : '') + '">' +
         '<input type="checkbox" data-binding-node-id="' + esc(node.id) + '"' + (selected ? ' checked' : '') + '>' +
         '<span class="binding-row-main"><strong>' + esc(node.name) + '</strong><span>' + esc(node.remark || node.protocol || '') + '</span></span>' +
@@ -803,7 +810,7 @@ export function renderAdminUi(env: Env): string {
         return;
       }
       byId('bindingEndpointFilter').disabled = false;
-      const globals = globalEndpoints().map((e) =>
+      const globals = globalEndpointsForBinding().map((e) =>
         '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
       ).join('');
       const options = bindingEndpoints().map((e) => {
@@ -876,10 +883,12 @@ export function renderAdminUi(env: Env): string {
       if (!isDomain) byId('endpointResolveMode').value = 'none';
     }
     function syncEndpointNodeControl() {
-      const isExclusive = byId('endpointRole').value === 'exclusive';
-      byId('endpointNodePicker').classList.toggle('hidden', !isExclusive);
-      byId('endpointNodeIds').disabled = !isExclusive;
-      if (isExclusive) renderEndpointNodeOptions();
+      const role = byId('endpointRole').value;
+      const usesNodes = role === 'exclusive' || role === 'global';
+      byId('endpointNodePickerTitle').textContent = role === 'global' ? 'Excluded Nodes' : 'Exclusive Nodes';
+      byId('endpointNodePicker').classList.toggle('hidden', !usesNodes);
+      byId('endpointNodeIds').disabled = !usesNodes;
+      if (usesNodes) renderEndpointNodeOptions();
       else markEndpointNodes([]);
     }
     function filterText(id) {
@@ -1468,7 +1477,7 @@ export function renderAdminUi(env: Env): string {
             byId('endpointLabel').value = row.label || '';
             byId('endpointSort').value = String(row.sort_order || 0);
             renderEndpointNodeOptions();
-            markEndpointNodes(row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : []);
+            markEndpointNodes(row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : (row.scope === 'global' ? (row.excludedProxyNodeIds || []) : []));
             syncEndpointResolveModeControl();
             syncEndpointNodeControl();
           }
@@ -1522,7 +1531,10 @@ export function renderAdminUi(env: Env): string {
     byId('bindingTrafficFilter').oninput = renderTunnelOptions;
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
     byId('endpointType').onchange = syncEndpointResolveModeControl;
-    byId('endpointRole').onchange = syncEndpointNodeControl;
+    byId('endpointRole').onchange = () => {
+      markEndpointNodes([]);
+      syncEndpointNodeControl();
+    };
     byId('selectAllEndpointNodes').onclick = () => markEndpointNodes(unique([...selectedEndpointNodeIds(), ...visibleEndpointNodes().map((node) => node.id)]));
     byId('clearEndpointNodes').onclick = () => markEndpointNodes([]);
     byId('endpointNodeFilter').oninput = renderEndpointNodeOptions;
@@ -1762,7 +1774,8 @@ export function renderAdminUi(env: Env): string {
           defaultSelected: role === 'global',
           enabled: byId('endpointEnabled').value === 'true',
           sortOrder: Number(byId('endpointSort').value || 0),
-          proxyNodeIds: role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : []
+          proxyNodeIds: role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : [],
+          excludedProxyNodeIds: role === 'global' ? selectedValues(byId('endpointNodeIds')) : []
         };
         if (editingEndpointId) body.value = byId('endpointValues').value;
         else body.values = byId('endpointValues').value;
