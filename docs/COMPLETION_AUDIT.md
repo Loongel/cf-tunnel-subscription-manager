@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Subscription Manager Completion Audit
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 This file tracks objective-level completion evidence. It is intentionally conservative: source code presence is not treated as final delivery proof until build, test, deployment, and smoke evidence exists.
 
@@ -17,6 +17,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | V2Ray, PassWall2, sing-box subscriptions | `/sub/v2ray/:token`, `/sub/passwall2/:token`, `/sub/sing-box/:token` implemented; protocol tests passed. | Unit verified |
 | Preferred IP/domain global and node-specific configuration | D1 tables, Admin API, and UI support global/node endpoint scope and per-node endpoint selection. | Build verified |
 | Preserve node-specific endpoint bindings during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping node-scoped endpoint selections. | Unit verified |
+| Preserve global endpoint exclusions during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping Global Always On endpoint exclusions attached to the new node IDs. | Unit verified |
 | Grouped subscription generation | Group CRUD and group-level endpoint mode defaults are implemented. | Build verified |
 | Agent does not download cloudflared at runtime | `agent/Dockerfile` downloads pinned `cloudflared 2026.6.0` at image build time; Docker build passed. | Docker verified |
 | Agent image release | `.github/workflows/release-agent-image.yml` publishes `ghcr.io/loongel/cf-tunnel-subscription-manager` for version tags. | Release configured |
@@ -39,7 +40,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`16` tests passed)
+- Worker `npm test` (`29` tests passed)
 - Agent `go test ./...`
 - Agent Docker build with `cloudflared 2026.6.0`
 - Worker `npm run d1:migrate:local`
@@ -55,6 +56,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - D1 cleanup of runtime test rows
 - Playwright browser test for admin UI login/config/preview flow
 - Chromium admin UI smoke for 2026-06-11 layout/notice cleanup
+- Code audit cleanup on 2026-06-12: preserved global endpoint exclusions across import refresh, moved group member selection state out of transient DOM chips, removed a dead preferred-endpoint wrapper, and kept schema cleanup candidates deferred.
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns
@@ -63,3 +65,13 @@ This file tracks objective-level completion evidence. It is intentionally conser
 
 - Deploy the production Swarm stack with real service targets and, if needed, a fixed `TUNNEL_TOKEN`.
 - Keep the old Worker until critical data has been migrated and the new deployment passes the cutover checks in `docs/DEPLOYMENT.md`.
+
+## Deferred Cleanup Candidates
+
+These items were reviewed during the 2026-06-12 code audit and intentionally left in place because they sit on migration or API compatibility boundaries:
+
+- `group_members`: early group-membership schema; current groups use derived-node filters in `groups.endpoint_filter_json`.
+- `proxy_nodes.selected_tunnel_id` and `proxy_node_tunnel_selections`: legacy tunnel binding compatibility; current traffic binding uses stable `proxy_node_traffic_bindings.traffic_key`.
+- `preferred_endpoints.default_selected`: retained schema field from the original endpoint model.
+- `proxy_nodes.raw_config_hash`: retained import metadata useful for diagnostics and future duplicate audits.
+- `proxy_nodes.import_key`: should be audited for duplicates before any future unique constraint migration.

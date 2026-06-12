@@ -193,6 +193,8 @@ export function renderAdminUi(env: Env): string {
     .select-chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 11px; min-height: 31px; max-width: 100%; color: var(--muted); background: #1a2435; font-size: 12px; line-height: 1.2; text-align: left; }
     .select-chip:hover { color: var(--text); border-color: var(--accent); }
     .select-chip.selected { color: var(--selected-text); border-color: #fb923c; background: var(--selected); box-shadow: 0 0 0 2px var(--selected-soft); }
+    .copy-chip { color: var(--accent-2); border-color: rgba(96, 165, 250, 0.38); background: rgba(96, 165, 250, 0.1); }
+    .copy-chip:hover { color: #f8fbff; background: rgba(96, 165, 250, 0.18); }
     .select-chip .chip-main { font-weight: 700; }
     .select-chip .chip-sub { margin-left: 6px; color: rgba(231, 237, 243, 0.72); overflow-wrap: anywhere; }
     .select-chip span { pointer-events: none; }
@@ -496,6 +498,7 @@ export function renderAdminUi(env: Env): string {
     let editingSniId = null;
     let editingImportSourceId = null;
     let activeImportSourceId = null;
+    const selectedDerivedIdSet = new Set();
 
     const byId = (id) => document.getElementById(id);
     const tokenInput = byId('tokenInput');
@@ -654,7 +657,7 @@ export function renderAdminUi(env: Env): string {
         const trafficIds = trafficIdsForNode(row);
         const path = trafficIds.length ? (trafficIds.length + ' Tunnel / SNI') : 'Direct';
         const endpointText = globalEndpointsForNode(row).length + ' global + ' + ((row.selectedEndpointIds || []).length) + ' additional';
-        return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
+        return '<tr data-select-node="' + esc(row.id) + '"><td>' + esc(row.name) + '<br><span class="muted">' + esc(row.remark || '') + '</span></td><td>' + esc(row.protocol) + '</td><td class="mono">' + esc(path) + '</td><td>' + esc(endpointText) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-node="' + esc(row.id) + '">Edit</button><button data-bind-node="' + esc(row.id) + '">Bind</button><button data-delete-node="' + esc(row.id) + '" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="6" class="muted">No proxy nodes.</td></tr>';
     }
     async function refreshEndpoints() {
@@ -669,6 +672,7 @@ export function renderAdminUi(env: Env): string {
     async function refreshGeneratedNodes() {
       const data = await api('/api/admin/subscriptions/generated-nodes?format=v2ray&endpointMode=selected');
       state.generatedNodes = (data.generatedNodes || []).filter((item) => !item.skipped);
+      pruneSelectedDerivedIds();
       renderGeneratedNodeOptions();
     }
     async function refreshGroups() {
@@ -953,7 +957,7 @@ export function renderAdminUi(env: Env): string {
       subscriptionLinks.innerHTML = rows.map(([formatName, url]) => {
         const chips = groups.map((group) => {
           const fullUrl = url + group.query;
-          return '<button type="button" class="select-chip" data-copy="' + esc(fullUrl) + '" title="' + esc(fullUrl) + '"><span class="chip-main">' + esc(group.name) + '</span></button>';
+          return '<button type="button" class="select-chip copy-chip" data-copy="' + esc(fullUrl) + '" title="' + esc(fullUrl) + '"><span class="chip-main">' + esc(group.name) + '</span></button>';
         }).join('');
         return '<div class="link-chip-row"><strong>' + esc(formatName) + '</strong><div class="link-chips">' + chips + '</div></div>';
       }).join('');
@@ -1168,12 +1172,33 @@ export function renderAdminUi(env: Env): string {
     }
     function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
     function selectedDerivedIds() {
-      return Array.from(document.querySelectorAll('[data-derived-id].selected')).map((button) => button.dataset.derivedId).filter(Boolean);
+      return Array.from(selectedDerivedIdSet);
     }
     function markDerivedCandidates(values) {
-      const set = new Set(values || []);
-      document.querySelectorAll('[data-derived-id]').forEach((button) => { button.classList.toggle('selected', set.has(button.dataset.derivedId)); });
+      selectedDerivedIdSet.clear();
+      for (const value of values || []) {
+        if (value) selectedDerivedIdSet.add(value);
+      }
+      syncDerivedCandidateChips();
       updateGroupSelectedCount();
+    }
+    function toggleDerivedCandidate(id) {
+      if (!id) return;
+      if (selectedDerivedIdSet.has(id)) selectedDerivedIdSet.delete(id);
+      else selectedDerivedIdSet.add(id);
+      syncDerivedCandidateChips();
+      updateGroupSelectedCount();
+    }
+    function syncDerivedCandidateChips() {
+      document.querySelectorAll('[data-derived-id]').forEach((button) => {
+        button.classList.toggle('selected', selectedDerivedIdSet.has(button.dataset.derivedId));
+      });
+    }
+    function pruneSelectedDerivedIds() {
+      const current = new Set(state.generatedNodes.map((item) => item.id));
+      for (const id of Array.from(selectedDerivedIdSet)) {
+        if (!current.has(id)) selectedDerivedIdSet.delete(id);
+      }
     }
     function updateGroupSelectedCount() { byId('groupSelectedCount').textContent = String(selectedDerivedIds().length); }
     function loadBindingFromNode(row) {
@@ -1349,8 +1374,7 @@ export function renderAdminUi(env: Env): string {
           }
         }
         if (t.dataset.derivedId) {
-          t.classList.toggle('selected');
-          updateGroupSelectedCount();
+          toggleDerivedCandidate(t.dataset.derivedId);
         }
         if (t.dataset.nodePanel) {
           document.querySelectorAll('.node-panel').forEach((el) => el.classList.toggle('hidden', el.id !== t.dataset.nodePanel));

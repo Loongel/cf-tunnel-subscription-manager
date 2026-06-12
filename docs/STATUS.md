@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Subscription Manager Status
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 Repository slug: `cf-tunnel-subscription-manager`.
 
@@ -20,6 +20,7 @@ Production Worker resource name remains `cf-tunnel-control-plane` to preserve th
   - Worker-served admin UI.
   - Subscription import-source management, fallback/TLS-carrier composition, and refresh semantics that replace stale imported nodes only after successful non-empty fetches.
   - Node-scoped endpoint selections are preserved across import-source refreshes.
+  - Global endpoint node exclusions are preserved across import-source refreshes.
 - Go tunnel agent:
   - Environment parsing and target normalization.
   - Fixed tunnel supervision.
@@ -44,7 +45,7 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - `./scripts/remote-build-hd01.sh`
 - Worker `npm ci`
 - Worker `npm run check`
-- Worker `npm test` (`16` tests passed)
+- Worker `npm test` (`29` tests passed)
 - Agent `go test ./...`
 - Agent Docker image build with `cloudflared 2026.6.0`
 - Production agent image configured as `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`
@@ -62,7 +63,8 @@ Executed on `ssh hd01` with `SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261`:
 - Admin UI browser test passed with Playwright on `hd01`: wrong token feedback, correct login, endpoint creation, proxy node creation, and subscription preview generation
 - Admin UI Chromium smoke passed on 2026-06-11 after layout cleanup: authenticated page no longer shows stale public-status notice, Proxy Nodes endpoint counts reflect loaded global endpoints, and Saved Groups chips render compactly.
 - Endpoint-binding regression test passed: refreshing imported nodes preserves node-scoped endpoint selections for future refreshes.
-- Worker deployed version `020883a3-fb90-4e2d-89ec-b1e99f5510b3`
+- Code audit cleanup passed on 2026-06-12: import refresh now preserves global endpoint exclusions, Group member selection survives filtering/re-rendering, subscription copy chips are visually distinct from selectable chips, and Proxy Nodes expose explicit Edit/Bind actions.
+- Worker deployed version `5f407d8c-5ce2-46e1-b923-3d53afe05c91`
 - Public agent image `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4` was published by GitHub Actions, anonymously pulled, and verified to report `cloudflared version 2026.6.0`
 - Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
 - A demo Swarm stack `cftunneldemo` is intentionally left running on `hd01` for manual UI validation; see `docs/USER_VALIDATION.md`
