@@ -1,5 +1,5 @@
 import { all, first } from "./db";
-import { encodeBase64, mutateShareUri, toSingBoxOutbound } from "./protocols";
+import { encodeBase64, mutateShareUri, parseEndpointTarget, toSingBoxOutbound } from "./protocols";
 import { tunnelTrafficKey, tunnelTrafficLabel } from "./tunnel-registry";
 import type { Env, GeneratedNode, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
 import { parseJsonObject } from "./utils";
@@ -193,7 +193,7 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
   ]);
 
   if (groupFilter?.exists === false) return [];
-  const endpoints = await resolveEndpointValues(rawEndpoints);
+  const endpoints = await resolveEndpointValues(env, rawEndpoints);
 
   const selectedByNode = new Map<string, Set<string>>();
   for (const selection of selections) {
@@ -381,19 +381,204 @@ function selectEndpoints(
   return [null, ...available.filter((endpoint) => endpoint.scope === "global" || selected.has(endpoint.id))];
 }
 
-async function resolveEndpointValues(endpoints: PreferredEndpointRow[]): Promise<PreferredEndpointRow[]> {
+async function resolveEndpointValues(env: Env, endpoints: PreferredEndpointRow[]): Promise<PreferredEndpointRow[]> {
   const cache = new Map<string, Promise<string | null>>();
   return await Promise.all(endpoints.map(async (endpoint) => {
+    if (endpoint.discovery_mode === "redirect") {
+      const key = `discovery:${endpoint.value.toLowerCase()}`;
+      let pending = cache.get(key);
+      if (!pending) {
+        pending = resolveDiscoveryEndpoint(env, endpoint.value);
+        cache.set(key, pending);
+      }
+      const resolved = await pending;
+      return resolved ? { ...endpoint, value: resolved } : endpoint;
+    }
     if (endpoint.type !== "domain" || endpoint.resolve_mode === "none") return endpoint;
-    const key = `${endpoint.resolve_mode}:${endpoint.value.toLowerCase()}`;
+    const target = parseEndpointTarget(endpoint.value);
+    const name = target.host || endpoint.value;
+    const key = `${endpoint.resolve_mode}:${name.toLowerCase()}`;
     let pending = cache.get(key);
     if (!pending) {
-      pending = resolveDomain(endpoint.value, endpoint.resolve_mode);
+      pending = resolveDomain(name, endpoint.resolve_mode).then((resolved) =>
+        resolved ? formatEndpointTarget(resolved, target.port) : null
+      );
       cache.set(key, pending);
     }
     const resolved = await pending;
     return resolved ? { ...endpoint, value: resolved } : endpoint;
   }));
+}
+
+function formatEndpointTarget(host: string, port?: string): string {
+  if (!port) return host;
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
+function discoveryUrl(value: string): URL {
+  const trimmed = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return new URL(trimmed);
+  return new URL(`https://${trimmed}`);
+}
+
+function defaultPortForProtocol(protocol: string): string | undefined {
+  if (protocol === "http:") return "80";
+  return undefined;
+}
+
+const DISCOVERY_FETCH_INIT: RequestInit = {
+  method: "GET",
+  redirect: "manual",
+  headers: {
+    accept: "text/html,application/json,text/plain,*/*",
+    "user-agent": "curl/8.5.0"
+  }
+};
+const DISCOVERY_SRV_PREFIXES = ["_vless", "_vmess", "_trojan", "_ss", "_shadowsocks", "_frps"];
+
+function discoveryFetchInit(env: Env, init: RequestInit = {}): RequestInit {
+  const headers = new Headers(DISCOVERY_FETCH_INIT.headers);
+  const accessValue = env.DISCOVERY_ACCESS_HEADER_VALUE?.trim();
+  if (accessValue) headers.set("x-woker-id", accessValue);
+  if (init.headers) {
+    new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  }
+  return { ...DISCOVERY_FETCH_INIT, ...init, headers };
+}
+
+async function resolveDiscoveryEndpoint(env: Env, value: string): Promise<string | null> {
+  let source: URL | null = null;
+  try {
+    source = discoveryUrl(value);
+    const response = await fetch(source.toString(), discoveryFetchInit(env));
+    const location = response.headers.get("location");
+    if ([301, 302, 303, 307, 308].includes(response.status) && location) {
+      const target = new URL(location, source);
+      return formatEndpointTarget(target.hostname, target.port || defaultPortForProtocol(target.protocol));
+    }
+    if (response.ok) {
+      const discovered = parseDiscoveryResponse(await response.text());
+      if (discovered) return discovered;
+    }
+    const headRedirect = await resolveHeadRedirect(env, source);
+    if (headRedirect) return headRedirect;
+
+    const followed = await fetch(source.toString(), discoveryFetchInit(env, { redirect: "follow" }));
+    if (followed.url && followed.url !== source.toString()) {
+      const target = new URL(followed.url);
+      return formatEndpointTarget(target.hostname, target.port || defaultPortForProtocol(target.protocol));
+    }
+    return await resolveSrvDiscovery(source.hostname);
+  } catch {
+    return source ? await resolveSrvDiscovery(source.hostname) : null;
+  }
+}
+
+async function resolveHeadRedirect(env: Env, source: URL): Promise<string | null> {
+  const response = await fetch(source.toString(), discoveryFetchInit(env, { method: "HEAD", redirect: "manual" }));
+  const location = response.headers.get("location");
+  if (![301, 302, 303, 307, 308].includes(response.status) || !location) return null;
+  const target = new URL(location, source);
+  return formatEndpointTarget(target.hostname, target.port || defaultPortForProtocol(target.protocol));
+}
+
+async function resolveSrvDiscovery(hostname: string): Promise<string | null> {
+  for (const prefix of DISCOVERY_SRV_PREFIXES) {
+    const resolved = await resolveSrvRecord(`${prefix}._tcp.${hostname}`);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+async function resolveSrvRecord(name: string): Promise<string | null> {
+  try {
+    const url = new URL("https://cloudflare-dns.com/dns-query");
+    url.searchParams.set("name", name);
+    url.searchParams.set("type", "SRV");
+    const response = await fetch(url.toString(), { headers: { accept: "application/dns-json" } });
+    if (!response.ok) return null;
+    const body = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
+    const answer = (body.Answer || []).find((item) => item.type === 33 && typeof item.data === "string");
+    if (!answer?.data) return null;
+    const parts = answer.data.trim().split(/\s+/);
+    if (parts.length < 4) return null;
+    const port = parts[2];
+    const target = parts.slice(3).join("").replace(/\.$/, "");
+    if (!target || !/^\d{1,5}$/.test(port) || Number(port) > 65535) return null;
+    return formatEndpointTarget(target, port);
+  } catch {
+    return null;
+  }
+}
+
+function parseDiscoveryResponse(body: string): string | null {
+  const jsonTarget = parseDiscoveryJson(body);
+  if (jsonTarget) return jsonTarget;
+
+  const text = htmlToText(body);
+  return parseHostPort(text) || parseHostPort(body) || parseTargetPortText(text);
+}
+
+function parseDiscoveryJson(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    for (const key of ["link", "endpoint", "address", "target", "server", "url"]) {
+      if (typeof record[key] === "string") {
+        const target = parseEndpointTarget(record[key]);
+        if (target.host && target.port) return formatEndpointTarget(target.host, target.port);
+      }
+    }
+    const host = firstString(record, ["host", "hostname", "target", "server", "address", "domain"]);
+    const port = firstString(record, ["port", "server_port", "serverPort"]);
+    if (host && port && /^\d{1,5}$/.test(port)) return formatEndpointTarget(host, port);
+  } catch {
+    // Not JSON.
+  }
+  return null;
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function htmlToText(input: string): string {
+  return input
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number.parseInt(code, 10)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseHostPort(input: string): string | null {
+  const re = /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]):([1-9]\d{0,4})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(input)) !== null) {
+    const port = Number(match[2]);
+    if (port > 65535) continue;
+    const host = match[1].replace(/^\[/, "").replace(/\]$/, "");
+    return formatEndpointTarget(host, String(port));
+  }
+  return null;
+}
+
+function parseTargetPortText(input: string): string | null {
+  const match = /(?:目标|target|host|server|address)\s*[:：]?\s*([a-z0-9.-]+|\[[0-9a-f:.]+\])\s*(?:端口|port)\s*[:：]?\s*([1-9]\d{0,4})/i.exec(input);
+  if (!match) return null;
+  const port = Number(match[2]);
+  if (port > 65535) return null;
+  return formatEndpointTarget(match[1].replace(/^\[/, "").replace(/\]$/, ""), match[2]);
 }
 
 async function resolveDomain(name: string, mode: "ipv4" | "ipv6"): Promise<string | null> {

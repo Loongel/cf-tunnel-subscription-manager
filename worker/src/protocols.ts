@@ -51,8 +51,46 @@ function displayName(ctx: MutationContext): string {
   return parts.join(" | ");
 }
 
+export function parseEndpointTarget(value: string): { host: string; port?: string } {
+  const trimmed = value.trim();
+  if (!trimmed) return { host: "" };
+  try {
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+      ? new URL(trimmed)
+      : new URL(`endpoint://${trimmed}`);
+    return {
+      host: url.hostname,
+      port: url.port || undefined
+    };
+  } catch {
+    // fall through
+  }
+
+  if (trimmed.startsWith("[") && trimmed.includes("]")) {
+    const end = trimmed.indexOf("]");
+    const host = trimmed.slice(1, end);
+    const suffix = trimmed.slice(end + 1);
+    return suffix.startsWith(":") && /^\d+$/.test(suffix.slice(1))
+      ? { host, port: suffix.slice(1) }
+      : { host };
+  }
+
+  const colonCount = (trimmed.match(/:/g) || []).length;
+  if (colonCount === 1) {
+    const [host, port] = trimmed.split(":");
+    if (host && /^\d+$/.test(port || "")) return { host, port };
+  }
+  return { host: trimmed };
+}
+
+function endpointTarget(ctx: MutationContext): { host: string; port?: string } | null {
+  if (!ctx.endpoint) return null;
+  const target = parseEndpointTarget(ctx.endpoint.value);
+  return target.host ? target : null;
+}
+
 function targetServer(ctx: MutationContext): string | null {
-  return ctx.endpoint?.value || ctx.tunnelHost || null;
+  return endpointTarget(ctx)?.host || ctx.tunnelHost || null;
 }
 
 function urlHostname(server: string): string {
@@ -63,6 +101,8 @@ function urlHostname(server: string): string {
 }
 
 function targetPort(rawPort: string | null, ctx: MutationContext): string {
+  const endpointPort = endpointTarget(ctx)?.port;
+  if (endpointPort) return endpointPort;
   if (hasEdgeOverride(ctx)) return "443";
   return rawPort && rawPort !== "" ? rawPort : "443";
 }

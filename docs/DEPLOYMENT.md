@@ -86,6 +86,7 @@ Set Worker secrets:
 npx wrangler secret put ADMIN_TOKEN
 npx wrangler secret put AGENT_TOKEN
 npx wrangler secret put SUBSCRIPTION_TOKEN
+npx wrangler secret put DISCOVERY_ACCESS_HEADER_VALUE
 ```
 
 Secret meanings:
@@ -95,6 +96,7 @@ Secret meanings:
 | `ADMIN_TOKEN` | yes | Browser/admin API | Bearer token for management UI and admin endpoints. |
 | `AGENT_TOKEN` | yes | Agent containers | Bearer token used by agents to register, heartbeat, post events, poll commands, and acknowledge commands. |
 | `SUBSCRIPTION_TOKEN` | yes | Subscription clients | Initial token embedded in `/sub/.../:token` URLs. The admin UI can rotate and persist the active token in D1. |
+| `DISCOVERY_ACCESS_HEADER_VALUE` | no | Discovery endpoint fetches | Optional shared value sent as `x-woker-id` when resolving Discovery URL preferred endpoints. Use it when an upstream Cloudflare access rule only allows Worker-to-service discovery requests with this header. |
 
 Back up the current remote D1 active business data before applying migrations:
 

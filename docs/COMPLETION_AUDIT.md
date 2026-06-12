@@ -16,6 +16,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 | Worker can command agent to restart quick tunnel | `commands` D1 table, admin restart endpoint, cron queue, and agent command polling are implemented. | Build verified |
 | V2Ray, PassWall2, sing-box subscriptions | `/sub/v2ray/:token`, `/sub/passwall2/:token`, `/sub/sing-box/:token` implemented; protocol tests passed. | Unit verified |
 | Preferred IP/domain global and node-specific configuration | D1 tables, Admin API, and UI support global/node endpoint scope and per-node endpoint selection. | Build verified |
+| Discovery URL preferred endpoints | `preferred_endpoints.discovery_mode` stores discovery endpoints; subscription generation resolves HTTP redirect `Location` or service information pages into final `host[:port]`; UI and Admin API support the new endpoint category; optional access header secret supports upstream Cloudflare access rules. | Deployed and smoke verified |
 | Preserve node-specific endpoint bindings during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping node-scoped endpoint selections. | Unit verified |
 | Preserve global endpoint exclusions during import refresh | `worker/test/admin-import.test.ts` covers replacing imported nodes while keeping Global Always On endpoint exclusions attached to the new node IDs. | Unit verified |
 | Grouped subscription generation | Group CRUD and group-level endpoint mode defaults are implemented. | Build verified |
@@ -58,6 +59,7 @@ This file tracks objective-level completion evidence. It is intentionally conser
 - Playwright browser test for admin UI login/config/preview flow
 - Chromium admin UI smoke for 2026-06-11 layout/notice cleanup
 - Code audit cleanup on 2026-06-12: preserved global endpoint exclusions across import refresh, moved group member selection state out of transient DOM chips, removed a dead preferred-endpoint wrapper, removed old tunnel-id binding compatibility, and applied schema cleanup migration `0012`.
+- Discovery URL endpoint deployment on 2026-06-12: migration `0013_endpoint_discovery_mode.sql` applied remotely, Worker deployed, temporary online endpoints generated `frps.n.gebi.party:42998` from `https://frps.s.gebi.party` and `n.gebi.party:42565` from `https://hm-vless.s.gebi.party`, smoke test passed, and temporary rows were removed.
 - `bash -n scripts/*.sh`
 - `git diff --check`
 - Secret scan for provided Cloudflare tokens and tunnel token patterns

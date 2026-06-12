@@ -17,6 +17,9 @@ ADMIN_TOKEN="${ADMIN_TOKEN:?set ADMIN_TOKEN}"
 AGENT_TOKEN="${AGENT_TOKEN:?set AGENT_TOKEN}"
 SUBSCRIPTION_TOKEN="${SUBSCRIPTION_TOKEN:?set SUBSCRIPTION_TOKEN}"
 export ADMIN_TOKEN AGENT_TOKEN SUBSCRIPTION_TOKEN
+if [[ -n "${DISCOVERY_ACCESS_HEADER_VALUE:-}" ]]; then
+  export DISCOVERY_ACCESS_HEADER_VALUE
+fi
 DEPLOY_CLOUDFLARE_ATTEMPTS="${DEPLOY_CLOUDFLARE_ATTEMPTS:-3}"
 
 retry_cloudflare() {
@@ -58,6 +61,9 @@ echo "== setting Worker secrets =="
 retry_cloudflare "ADMIN_TOKEN secret upload" bash -c 'printf "%s" "$ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN'
 retry_cloudflare "AGENT_TOKEN secret upload" bash -c 'printf "%s" "$AGENT_TOKEN" | npx wrangler secret put AGENT_TOKEN'
 retry_cloudflare "SUBSCRIPTION_TOKEN secret upload" bash -c 'printf "%s" "$SUBSCRIPTION_TOKEN" | npx wrangler secret put SUBSCRIPTION_TOKEN'
+if [[ -n "${DISCOVERY_ACCESS_HEADER_VALUE:-}" ]]; then
+  retry_cloudflare "DISCOVERY_ACCESS_HEADER_VALUE secret upload" bash -c 'printf "%s" "$DISCOVERY_ACCESS_HEADER_VALUE" | npx wrangler secret put DISCOVERY_ACCESS_HEADER_VALUE'
+fi
 
 echo "== deploying Worker =="
 retry_cloudflare "Worker deploy" npm run deploy

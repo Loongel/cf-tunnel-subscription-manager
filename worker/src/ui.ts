@@ -410,12 +410,12 @@ export function renderAdminUi(env: Env): string {
           <div class="actions"><button id="refreshEndpoints">Refresh</button><button id="cancelEndpointEdit" class="subtle">Cancel Edit</button></div>
         </div>
         <div class="formgrid">
-          <label>Type<select id="endpointType"><option value="ip">IP</option><option value="domain">Domain</option></select></label>
+          <label>Type<select id="endpointType"><option value="ip">IP</option><option value="domain">Domain</option><option value="redirect">Discovery URL</option></select></label>
           <label>Role<select id="endpointRole"><option value="global">Global Always On</option><option value="node">Binding Option</option><option value="exclusive">Exclusive Binding Option</option></select></label>
           <label>Domain Resolve<select id="endpointResolveMode"><option value="none">Do Not Resolve</option><option value="ipv4">Resolve IPv4</option><option value="ipv6">Resolve IPv6</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
-          <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com"></textarea></label>
+          <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com&#10;https://discovery.example.com"></textarea></label>
           <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
           <div id="endpointNodePicker" class="subpanel full hidden">
             <div class="toolbar">
@@ -666,7 +666,7 @@ export function renderAdminUi(env: Env): string {
       renderEndpointOptions();
       renderEndpointNodeOptions();
       endpointsBody.innerHTML = state.endpoints.map((row) =>
-        '<tr><td>' + esc(row.type) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(endpointRoleLabel(row)) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+        '<tr><td>' + esc(endpointTypeLabel(row)) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(endpointRoleLabel(row)) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
       ).join('') || '<tr><td colspan="6" class="muted">No preferred endpoints.</td></tr>';
     }
     async function refreshGeneratedNodes() {
@@ -809,18 +809,18 @@ export function renderAdminUi(env: Env): string {
         byId('bindingEndpointFilter').disabled = true;
         byId('bindingEndpointFilter').value = '';
         byId('bindingEndpoints').innerHTML = singleExclusive.map((e) =>
-          '<option value="' + esc(e.id) + '" disabled selected>' + esc('Exclusive: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
+          '<option value="' + esc(e.id) + '" disabled selected>' + esc('Exclusive: ' + (e.label || e.value) + ' / ' + endpointTypeLabel(e)) + '</option>'
         ).join('');
         return;
       }
       byId('bindingEndpointFilter').disabled = false;
       const globals = globalEndpointsForBinding().map((e) =>
-        '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
+        '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + endpointTypeLabel(e)) + '</option>'
       ).join('');
       const options = bindingEndpoints().map((e) => {
         const label = e.label || e.value;
         if (query && !selected.has(e.id) && !label.toLowerCase().includes(query)) return '';
-        return '<option value="' + esc(e.id) + '">' + esc(label) + ' / ' + esc(e.type) + '</option>';
+        return '<option value="' + esc(e.id) + '">' + esc(label) + ' / ' + esc(endpointTypeLabel(e)) + '</option>';
       }).join('');
       byId('bindingEndpoints').innerHTML = globals + options;
       markSelected(byId('bindingEndpoints'), Array.from(selected));
@@ -871,10 +871,18 @@ export function renderAdminUi(env: Env): string {
       byId('endpointNodeSelectedCount').textContent = String(selectedEndpointNodeIds().length);
     }
     function endpointResolveLabel(row) {
+      if (row.discovery_mode === 'redirect') return 'Discover Target';
       if (row.type !== 'domain') return '-';
       if (row.resolve_mode === 'ipv4') return 'Resolve IPv4';
       if (row.resolve_mode === 'ipv6') return 'Resolve IPv6';
       return 'Do Not Resolve';
+    }
+    function endpointTypeValue(row) {
+      return row.discovery_mode === 'redirect' ? 'redirect' : (row.type || 'ip');
+    }
+    function endpointTypeLabel(row) {
+      if (row.discovery_mode === 'redirect') return 'Discovery';
+      return row.type || 'ip';
     }
     function endpointRoleLabel(row) {
       if (row.scope === 'global') return 'Global Always On';
@@ -1493,7 +1501,7 @@ export function renderAdminUi(env: Env): string {
           if (row) {
             editingEndpointId = row.id;
             byId('createEndpoint').textContent = 'Save Endpoint';
-            byId('endpointType').value = row.type || 'ip';
+            byId('endpointType').value = endpointTypeValue(row);
             byId('endpointRole').value = row.scope === 'node' && row.selection_mode === 'exclusive' ? 'exclusive' : (row.scope || 'global');
             byId('endpointResolveMode').value = row.resolve_mode || 'none';
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
@@ -1788,8 +1796,10 @@ export function renderAdminUi(env: Env): string {
         const method = editingEndpointId ? 'PATCH' : 'POST';
         const wasEditing = Boolean(editingEndpointId);
         const role = byId('endpointRole').value;
+        const endpointType = byId('endpointType').value;
         const body = {
-          type: byId('endpointType').value,
+          type: endpointType,
+          discoveryMode: endpointType === 'redirect' ? 'redirect' : 'static',
           resolveMode: byId('endpointResolveMode').value,
           label: byId('endpointLabel').value,
           scope: role === 'exclusive' ? 'node' : role,

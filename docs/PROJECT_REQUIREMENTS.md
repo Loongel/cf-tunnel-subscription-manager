@@ -372,13 +372,14 @@ http://s2:2096 https://another.trycloudflare.com
 | 字段 | 说明 |
 | --- | --- |
 | `id` | endpoint ID。 |
-| `type` | `ip/domain`。 |
-| `value` | 优选 IP 或优选域名。 |
+| `type` | `ip/domain`。Discovery URL 在存储中仍归为 `domain`。 |
+| `value` | 优选 IP、优选域名，或 Discovery URL 入口 URL/域名。 |
 | `label` | 展示名。 |
 | `enabled` | 是否启用。 |
 | `scope` | `global/node`。`global` 对所有节点可见，`node` 只对指定节点可见。 |
 | `selection_mode` | `additive/exclusive`，排他 endpoint 会覆盖该节点的其他 endpoint 派生。 |
 | `resolve_mode` | 域名 endpoint 是否在订阅输出时解析为 IPv4/IPv6。 |
+| `discovery_mode` | `static/redirect`。`redirect` 表示订阅输出时访问入口地址；优先读取 301/302/303/307/308 `Location`，如果返回服务信息页则从 JSON/HTML/文本中提取 `host[:port]` 或“目标/端口”，用结果作为最终 endpoint。若配置了 `DISCOVERY_ACCESS_HEADER_VALUE`，Worker 访问 discovery endpoint 时会附带 `x-woker-id`。 |
 | `sort_order` | 排序。 |
 
 `preferred_endpoint_node_scopes`
@@ -672,6 +673,7 @@ UI 目标是“运维控制台”，不是营销页。信息应紧凑、可扫�
 - `Node-specific` 标签页录入节点级 endpoint，并可批量分配给一个或多个代理节点。
 - 代理节点配置页最终决定“该节点实际选用哪些 endpoint”。
 - 全局 endpoint 默认参与所有节点派生，除非该 endpoint 配置了排除节点；排他 endpoint 会覆盖该节点的其他 endpoint。
+- Discovery URL endpoint 输入一个发现域名或 URL；订阅请求时 Worker 访问该地址，读取 HTTP 重定向目标或服务信息页，并把目标域名和端口作为派生节点的最终连接 endpoint。
 
 ### 8.6 Subscriptions 草图
 

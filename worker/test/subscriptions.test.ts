@@ -67,7 +67,7 @@ class MockStatement {
   }
 }
 
-function env(tables: TableMap): Env {
+function env(tables: TableMap, overrides: Partial<Env> = {}): Env {
   return {
     DB: {
       prepare(query: string) {
@@ -76,7 +76,8 @@ function env(tables: TableMap): Env {
     } as unknown as D1Database,
     ADMIN_TOKEN: "admin",
     AGENT_TOKEN: "agent",
-    SUBSCRIPTION_TOKEN: "sub"
+    SUBSCRIPTION_TOKEN: "sub",
+    ...overrides
   };
 }
 
@@ -258,6 +259,145 @@ describe("subscription generation", () => {
     const parsed = new URL(endpointNode?.uri || "");
     expect(parsed.hostname).toBe("198.51.100.10");
     expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | edge-domain");
+  });
+
+  it("discovers redirect endpoints at subscription generation time and preserves the target port", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 307,
+      headers: { location: "https://real-edge.example.com:8443/path" }
+    })));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_redirect",
+        type: "domain",
+        value: "discovery.example.com",
+        label: "redirect-edge",
+        discovery_mode: "redirect"
+      }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith("https://discovery.example.com/", expect.objectContaining({ method: "GET", redirect: "manual" }));
+    const endpointNode = generated.find((item) => item.endpointId === "endpoint_redirect");
+    expect(endpointNode).toMatchObject({
+      endpointId: "endpoint_redirect",
+      endpointValue: "real-edge.example.com:8443",
+      endpointLabel: "redirect-edge"
+    });
+    const parsed = new URL(endpointNode?.uri || "");
+    expect(parsed.hostname).toBe("real-edge.example.com");
+    expect(parsed.port).toBe("8443");
+    expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | redirect-edge");
+  });
+
+  it("sends the configured discovery access header when resolving discovery endpoints", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 307,
+      headers: { location: "https://real-edge.example.com:8443/path" }
+    })));
+
+    await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_redirect",
+        type: "domain",
+        value: "https://discovery.example.com",
+        label: "redirect-edge",
+        discovery_mode: "redirect"
+      }]
+    }, {
+      DISCOVERY_ACCESS_HEADER_VALUE: "test-secret"
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("x-woker-id")).toBe("test-secret");
+  });
+
+  it("discovers non-web service info pages with target and port", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`
+      <dl>
+        <dt>目标</dt><dd>n.gebi.party</dd>
+        <dt>端口</dt><dd><code>42565</code></dd>
+        <dt>链接</dt><dd><span>n.gebi.party:42565</span></dd>
+      </dl>
+    `, { status: 200, headers: { "content-type": "text/html" } })));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_service_info",
+        type: "domain",
+        value: "hm-vless.s.gebi.party",
+        label: "service-info",
+        discovery_mode: "redirect"
+      }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    const endpointNode = generated.find((item) => item.endpointId === "endpoint_service_info");
+    expect(endpointNode).toMatchObject({
+      endpointId: "endpoint_service_info",
+      endpointValue: "n.gebi.party:42565",
+      endpointLabel: "service-info"
+    });
+    const parsed = new URL(endpointNode?.uri || "");
+    expect(parsed.hostname).toBe("n.gebi.party");
+    expect(parsed.port).toBe("42565");
+  });
+
+  it("falls back to DNS SRV records for non-web discovery endpoints", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("dns-query")) {
+        return new Response(JSON.stringify({
+          Answer: [{ type: 33, data: "0 65535 42565 n.gebi.party" }]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("forbidden", { status: 403 });
+    }));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_srv",
+        type: "domain",
+        value: "hm-vless.s.gebi.party",
+        label: "srv-info",
+        discovery_mode: "redirect"
+      }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    const endpointNode = generated.find((item) => item.endpointId === "endpoint_srv");
+    expect(endpointNode).toMatchObject({
+      endpointId: "endpoint_srv",
+      endpointValue: "n.gebi.party:42565",
+      endpointLabel: "srv-info"
+    });
   });
 
   it("reuses DNS lookups for repeated domain endpoints with the same resolve mode", async () => {

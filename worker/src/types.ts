@@ -4,6 +4,7 @@ export interface Env {
   ADMIN_TOKEN: string;
   AGENT_TOKEN: string;
   SUBSCRIPTION_TOKEN: string;
+  DISCOVERY_ACCESS_HEADER_VALUE?: string;
   PUBLIC_BASE_URL?: string;
   SUBCONVERTER_URL?: string;
 }
@@ -90,6 +91,7 @@ export interface PreferredEndpointRow {
   value: string;
   label: string | null;
   resolve_mode: "none" | "ipv4" | "ipv6";
+  discovery_mode?: "static" | "redirect";
   selection_mode: "additive" | "exclusive";
   enabled: number;
   scope: "global" | "node";

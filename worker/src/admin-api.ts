@@ -1553,9 +1553,10 @@ async function createPreferredEndpointForValue(
   value: string
 ): Promise<{ row: PreferredEndpointRow | null }> {
   const id = optionalString(body.id) || makeId("endpoint");
-  const type = requiredString(body.type, "type");
-  if (type !== "ip" && type !== "domain") throw new HttpError(400, "type must be ip or domain");
-  const resolveMode = endpointResolveMode(body.resolveMode, type);
+  const inputType = endpointInputType(requiredString(body.type, "type"));
+  const type = endpointStorageType(inputType);
+  const discoveryMode = endpointDiscoveryMode(body.discoveryMode, inputType);
+  const resolveMode = endpointResolveMode(body.resolveMode, inputType);
   const scope = optionalString(body.scope) || "global";
   if (scope !== "global" && scope !== "node") throw new HttpError(400, "scope must be global or node");
   const timestamp = nowIso();
@@ -1571,10 +1572,11 @@ async function createPreferredEndpointForValue(
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
-        label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
+        label = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
       resolveMode,
+      discoveryMode,
       selectionMode,
       body.enabled === undefined ? existing.enabled : boolToInt(body.enabled, true),
       intOrNull(body.sortOrder) ?? existing.sort_order,
@@ -1590,13 +1592,14 @@ async function createPreferredEndpointForValue(
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
-      (id, type, value, label, resolve_mode, selection_mode, enabled, scope, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, type, value, label, resolve_mode, discovery_mode, selection_mode, enabled, scope, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     type,
     value,
     optionalString(body.label),
     resolveMode,
+    discoveryMode,
     selectionMode,
     boolToInt(body.enabled, true),
     scope,
@@ -1612,21 +1615,28 @@ async function createPreferredEndpointForValue(
 async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): Promise<PreferredEndpointRow | null> {
   const current = await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id);
   if (!current) throw new HttpError(404, "preferred endpoint not found");
-  const type = optionalString(body.type) || current.type;
+  const inputType = body.type === undefined
+    ? endpointInputType(current.discovery_mode === "redirect" ? "redirect" : current.type)
+    : endpointInputType(body.type);
+  const type = endpointStorageType(inputType);
   const scope = optionalString(body.scope) || current.scope;
+  const discoveryMode = body.discoveryMode === undefined
+    ? endpointDiscoveryMode(current.discovery_mode || "static", inputType)
+    : endpointDiscoveryMode(body.discoveryMode, inputType);
   const resolveMode = body.resolveMode === undefined
-    ? endpointResolveMode(current.resolve_mode, type)
-    : endpointResolveMode(body.resolveMode, type);
+    ? endpointResolveMode(current.resolve_mode, inputType)
+    : endpointResolveMode(body.resolveMode, inputType);
   const selectionMode = endpointSelectionModeForUpdate(body.selectionMode, scope, current);
   await run(
     env.DB,
     `UPDATE preferred_endpoints SET
-      type = ?, value = ?, label = ?, resolve_mode = ?, selection_mode = ?, enabled = ?, scope = ?, sort_order = ?, updated_at = ?
+      type = ?, value = ?, label = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, scope = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
     type,
     optionalString(body.value) || current.value,
     body.label === null ? null : optionalString(body.label) || current.label,
     resolveMode,
+    discoveryMode,
     selectionMode,
     body.enabled === undefined ? current.enabled : boolToInt(body.enabled),
     scope,
@@ -1637,6 +1647,22 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
   await replaceEndpointScopes(env, id, body);
   await replaceEndpointExclusions(env, id, body);
   return await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", id);
+}
+
+function endpointInputType(value: unknown): "ip" | "domain" | "redirect" {
+  const type = optionalString(value);
+  if (type === "ip" || type === "domain" || type === "redirect") return type;
+  throw new HttpError(400, "type must be ip, domain, or redirect");
+}
+
+function endpointStorageType(type: "ip" | "domain" | "redirect"): PreferredEndpointRow["type"] {
+  return type === "redirect" ? "domain" : type;
+}
+
+function endpointDiscoveryMode(value: unknown, type: "ip" | "domain" | "redirect"): NonNullable<PreferredEndpointRow["discovery_mode"]> {
+  if (type === "redirect") return "redirect";
+  void value;
+  return "static";
 }
 
 function endpointResolveMode(value: unknown, type: string): PreferredEndpointRow["resolve_mode"] {
