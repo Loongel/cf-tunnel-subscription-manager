@@ -117,6 +117,8 @@ The helper script reads `.secrets/worker.env` by default, then runs dependency i
 ./scripts/deploy-worker.sh
 ```
 
+Cloudflare remote operations can fail intermittently on network fetches. The helper retries D1 migrations, secret uploads, and Worker deploys three times by default. Override with `DEPLOY_CLOUDFLARE_ATTEMPTS=<n>` when needed.
+
 To use a different local secret file:
 
 ```bash
