@@ -1694,22 +1694,22 @@ function endpointSelectionModeForUpdate(
 async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRecord): Promise<void> {
   if (!Array.isArray(body.proxyNodeIds)) return;
   const endpoint = await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", endpointId);
-  const nodeIds = Array.from(new Set(body.proxyNodeIds
-    .filter((nodeId): nodeId is string => typeof nodeId === "string" && nodeId.trim() !== "")
-    .map((nodeId) => nodeId.trim())));
+  const nodeIds = await existingProxyNodeIds(env, body.proxyNodeIds);
   const existingScopes = await all<{ proxy_node_id: string }>(
     env.DB,
     "SELECT proxy_node_id FROM preferred_endpoint_node_scopes WHERE endpoint_id = ?",
     endpointId
   );
   await run(env.DB, "DELETE FROM preferred_endpoint_node_scopes WHERE endpoint_id = ?", endpointId);
-  for (const nodeId of nodeIds) {
-    await run(
-      env.DB,
-      "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
-      endpointId,
-      nodeId
-    );
+  if (endpoint?.scope === "node") {
+    for (const nodeId of nodeIds) {
+      await run(
+        env.DB,
+        "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
+        endpointId,
+        nodeId
+      );
+    }
   }
   if (endpoint?.scope === "node" && endpoint.selection_mode === "exclusive") {
     await run(env.DB, "DELETE FROM proxy_node_endpoint_selections WHERE endpoint_id = ?", endpointId);
@@ -1740,9 +1740,7 @@ async function replaceEndpointExclusions(env: Env, endpointId: string, body: Jso
   const endpoint = await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", endpointId);
   await run(env.DB, "DELETE FROM preferred_endpoint_node_exclusions WHERE endpoint_id = ?", endpointId);
   if (endpoint?.scope !== "global") return;
-  const nodeIds = Array.from(new Set(body.excludedProxyNodeIds
-    .filter((nodeId): nodeId is string => typeof nodeId === "string" && nodeId.trim() !== "")
-    .map((nodeId) => nodeId.trim())));
+  const nodeIds = await existingProxyNodeIds(env, body.excludedProxyNodeIds);
   for (const nodeId of nodeIds) {
     await run(
       env.DB,
@@ -1751,6 +1749,21 @@ async function replaceEndpointExclusions(env: Env, endpointId: string, body: Jso
       nodeId
     );
   }
+}
+
+async function existingProxyNodeIds(env: Env, values: unknown[]): Promise<string[]> {
+  const ids = Array.from(new Set(values
+    .filter((nodeId): nodeId is string => typeof nodeId === "string" && nodeId.trim() !== "")
+    .map((nodeId) => nodeId.trim())));
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = await all<{ id: string }>(
+    env.DB,
+    `SELECT id FROM proxy_nodes WHERE id IN (${placeholders})`,
+    ...ids
+  );
+  const existing = new Set(rows.map((row) => row.id));
+  return ids.filter((id) => existing.has(id));
 }
 
 async function listGroups(env: Env): Promise<unknown[]> {
