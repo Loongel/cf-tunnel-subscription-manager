@@ -241,6 +241,38 @@ describe("admin import refresh", () => {
     expect(tables.nodes.map((row) => row.name).sort()).toEqual(["a direct-out@usr", "b direct-out@usr"]);
   });
 
+  it("keeps import identity stable for volatile reality params and requester IP substitutions", async () => {
+    const tables: TableMap = { nodes: [], endpoints: [], endpointSelections: [] };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "usually@3xui.hk",
+      candidates: [
+        {
+          id: "candidate_1",
+          sourceName: "usually@3xui.hk",
+          sourceGroup: "usually@3xui.hk",
+          sourceType: "v2ray_uri",
+          name: "reality-node",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000001@162.158.193.44:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=aaa&spx=bbb#reality-node",
+          protocol: "vless"
+        },
+        {
+          id: "candidate_2",
+          sourceName: "usually@3xui.hk",
+          sourceGroup: "usually@3xui.hk",
+          sourceType: "v2ray_uri",
+          name: "reality-node",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000001@172.68.211.216:443?security=reality&type=tcp&fp=chrome&sni=hkust.edu.hk&sid=ccc&spx=ddd#reality-node",
+          protocol: "vless"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({ imported: 1, updated: 0, skipped: 1 });
+    expect(tables.nodes).toHaveLength(1);
+    expect(tables.nodes[0].name).toBe("reality-node");
+  });
+
   it("derives imported node names from the selected TLS carrier before duplicate fallback", async () => {
     const tables: TableMap = { nodes: [], endpoints: [], endpointSelections: [] };
 
