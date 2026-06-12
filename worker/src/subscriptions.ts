@@ -145,7 +145,19 @@ async function generateNodes(env: Env, options: SubscriptionOptions): Promise<Ge
       env.DB,
       "SELECT * FROM preferred_endpoints WHERE enabled = 1 ORDER BY sort_order, value"
     ),
-    all<SelectionRow>(env.DB, "SELECT * FROM proxy_node_endpoint_selections WHERE enabled = 1"),
+    all<SelectionRow>(
+      env.DB,
+      `SELECT proxy_node_id, endpoint_id, enabled
+       FROM proxy_node_endpoint_selections
+       WHERE enabled = 1
+       UNION
+       SELECT s.proxy_node_id, s.endpoint_id, 1 AS enabled
+       FROM preferred_endpoint_node_scopes s
+       JOIN preferred_endpoints e ON e.id = s.endpoint_id
+       WHERE e.enabled = 1
+         AND e.scope = 'node'
+         AND e.selection_mode = 'exclusive'`
+    ),
     all<TrafficBindingRow>(
       env.DB,
       "SELECT proxy_node_id, traffic_key FROM proxy_node_traffic_bindings WHERE enabled = 1"

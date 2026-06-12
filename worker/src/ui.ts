@@ -556,7 +556,9 @@ export function renderAdminUi(env: Env): string {
       Array.from(select.options).forEach((option) => { option.selected = option.disabled || set.has(option.value); });
     }
     function selectedAdditionalEndpointIds() {
-      return selectedValues(byId('bindingEndpoints')).filter((id) => !id.startsWith('global:'));
+      const exclusiveIds = new Set(exclusiveEndpoints().map((endpoint) => endpoint.id));
+      return selectedValues(byId('bindingEndpoints'))
+        .filter((id) => !id.startsWith('global:') && !exclusiveIds.has(id));
     }
     function selectedEndpointNodeIds() {
       return selectedValues(byId('endpointNodeIds')).filter((id) => state.nodes.some((node) => node.id === id));
@@ -692,7 +694,8 @@ export function renderAdminUi(env: Env): string {
     }
 
     function globalEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope === 'global'); }
-    function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global'); }
+    function exclusiveEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global' && e.selection_mode === 'exclusive'); }
+    function bindingEndpoints() { return state.endpoints.filter((e) => e.enabled && e.scope !== 'global' && e.selection_mode !== 'exclusive'); }
     function globalEndpointCount() { return globalEndpoints().length; }
     function renderTunnelOptions() {
       const selected = new Set(selectedValues(byId('bindingTraffic')));
@@ -732,6 +735,25 @@ export function renderAdminUi(env: Env): string {
         ...(node.selectedSniIds || []).map((id) => 'sni:' + id)
       ];
     }
+    function exclusiveEndpointsForNode(node) {
+      const selected = new Set(node.selectedEndpointIds || []);
+      return exclusiveEndpoints().filter((endpoint) =>
+        selected.has(endpoint.id) || (endpoint.proxyNodeIds || []).includes(node.id)
+      );
+    }
+    function hasExclusiveEndpoint(node) {
+      return exclusiveEndpointsForNode(node).length > 0;
+    }
+    function selectedBindingNodes() {
+      const ids = new Set(selectedBindingNodeIds());
+      return state.nodes.filter((node) => ids.has(node.id));
+    }
+    function endpointEditableNodeIds(ids) {
+      const idSet = new Set(ids || []);
+      return state.nodes
+        .filter((node) => idSet.has(node.id) && !hasExclusiveEndpoint(node))
+        .map((node) => node.id);
+    }
     function renderBindingNodeList() {
       const selected = new Set(selectedBindingNodeIds().filter((id) => state.nodes.some((node) => node.id === id)));
       byId('bindingNodes').innerHTML = state.nodes.map((n) => {
@@ -770,6 +792,17 @@ export function renderAdminUi(env: Env): string {
     function renderEndpointOptions() {
       const selected = new Set(selectedAdditionalEndpointIds());
       const query = filterText('bindingEndpointFilter');
+      const selectedNodes = selectedBindingNodes();
+      const singleExclusive = selectedNodes.length === 1 ? exclusiveEndpointsForNode(selectedNodes[0]) : [];
+      if (singleExclusive.length > 0) {
+        byId('bindingEndpointFilter').disabled = true;
+        byId('bindingEndpointFilter').value = '';
+        byId('bindingEndpoints').innerHTML = singleExclusive.map((e) =>
+          '<option value="' + esc(e.id) + '" disabled selected>' + esc('Exclusive: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
+        ).join('');
+        return;
+      }
+      byId('bindingEndpointFilter').disabled = false;
       const globals = globalEndpoints().map((e) =>
         '<option value="global:' + esc(e.id) + '" disabled selected>' + esc('Global: ' + (e.label || e.value) + ' / ' + e.type) + '</option>'
       ).join('');
@@ -1122,6 +1155,7 @@ export function renderAdminUi(env: Env): string {
         if (row) row.classList.toggle('selected', input.checked);
       });
       updateBindingSelectedCount();
+      renderEndpointOptions();
     }
     function updateBindingSelectedCount() { byId('bindingSelectedCount').textContent = String(selectedBindingNodeIds().length); }
     function selectedDerivedIds() {
@@ -1671,12 +1705,13 @@ export function renderAdminUi(env: Env): string {
         if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
         const selectedTrafficIds = selectedValues(byId('bindingTraffic'));
         const selectedEndpointIds = selectedAdditionalEndpointIds();
+        const endpointNodeIds = new Set(endpointEditableNodeIds(ids));
         await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({
             useTunnel: selectedTrafficIds.length > 0,
             selectedTrafficIds,
-            selectedEndpointIds
+            ...(endpointNodeIds.has(id) ? { selectedEndpointIds } : {})
           })
         })));
         await refreshNodes();
@@ -1687,7 +1722,8 @@ export function renderAdminUi(env: Env): string {
         markSelected(byId('bindingEndpoints'), selectedEndpointIds);
         await refreshGeneratedNodes();
         await refreshGroups();
-        setNotice('Binding applied to ' + ids.length + ' node(s).', 'ok');
+        const skipped = ids.length - endpointNodeIds.size;
+        setNotice('Binding applied to ' + ids.length + ' node(s)' + (skipped ? '; endpoint changes skipped for ' + skipped + ' exclusive node(s).' : '.'), 'ok');
       } catch (err) {
         setNotice(formatError(err), 'error');
       }
@@ -1696,7 +1732,9 @@ export function renderAdminUi(env: Env): string {
       try {
         const ids = selectedBindingNodeIds();
         if (ids.length === 0) throw new Error('Select at least one node in Nodes To Update.');
-        await Promise.all(ids.map((id) => api('/api/admin/proxy-nodes/' + id, {
+        const endpointIds = endpointEditableNodeIds(ids);
+        if (endpointIds.length === 0) throw new Error('Selected nodes use exclusive endpoints; clear or change them in Preferred Endpoints.');
+        await Promise.all(endpointIds.map((id) => api('/api/admin/proxy-nodes/' + id, {
           method: 'PATCH',
           body: JSON.stringify({ selectedEndpointIds: [] })
         })));
@@ -1704,7 +1742,7 @@ export function renderAdminUi(env: Env): string {
         await refreshNodes();
         await refreshGeneratedNodes();
         await refreshGroups();
-        setNotice('Additional endpoint selections cleared for ' + ids.length + ' node(s).', 'ok');
+        setNotice('Additional endpoint selections cleared for ' + endpointIds.length + ' node(s)' + (endpointIds.length < ids.length ? '; exclusive node(s) skipped.' : '.'), 'ok');
       } catch (err) {
         setNotice(formatError(err), 'error');
       }

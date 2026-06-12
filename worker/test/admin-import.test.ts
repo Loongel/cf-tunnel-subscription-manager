@@ -157,6 +157,14 @@ class MockStatement {
       const nodeIds = new Set(this.params.map(String));
       return (this.tables.sniSelections || []).filter((row) => row.enabled === 1 && nodeIds.has(row.proxy_node_id));
     }
+    if (this.query.includes("SELECT id")
+      && this.query.includes("FROM preferred_endpoints")
+      && this.query.includes("selection_mode <> 'exclusive'")) {
+      const ids = new Set(this.params.map(String));
+      return this.tables.endpoints
+        .filter((row) => ids.has(row.id) && row.scope === "node" && row.selection_mode !== "exclusive")
+        .map((row) => ({ id: row.id }));
+    }
     if (this.query.includes("SELECT * FROM proxy_nodes WHERE id = ?")) {
       return this.tables.nodes.filter((row) => row.id === this.params[0]);
     }

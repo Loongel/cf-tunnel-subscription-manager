@@ -6,6 +6,7 @@ type TableMap = {
   nodes: ProxyNodeRow[];
   endpoints: PreferredEndpointRow[];
   endpointSelections?: Array<{ proxy_node_id: string; endpoint_id: string; enabled: number }>;
+  endpointScopes?: Array<{ proxy_node_id: string; endpoint_id: string }>;
   tunnelSelections?: Array<Record<string, unknown>>;
   trafficBindings?: Array<{ proxy_node_id: string; traffic_key: string; enabled: number }>;
   tunnels?: TunnelRow[];
@@ -40,8 +41,19 @@ class MockStatement {
 
   private rows(): unknown[] {
     if (this.query.includes("FROM proxy_nodes")) return this.tables.nodes;
+    if (this.query.includes("FROM proxy_node_endpoint_selections")) {
+      const rows = [...(this.tables.endpointSelections || [])];
+      if (this.query.includes("FROM preferred_endpoint_node_scopes")) {
+        const exclusiveIds = new Set(this.tables.endpoints
+          .filter((row) => row.enabled === 1 && row.scope === "node" && row.selection_mode === "exclusive")
+          .map((row) => row.id));
+        rows.push(...(this.tables.endpointScopes || [])
+          .filter((row) => exclusiveIds.has(row.endpoint_id))
+          .map((row) => ({ ...row, enabled: 1 })));
+      }
+      return rows;
+    }
     if (this.query.includes("FROM preferred_endpoints")) return this.tables.endpoints;
-    if (this.query.includes("FROM proxy_node_endpoint_selections")) return this.tables.endpointSelections || [];
     if (this.query.includes("FROM proxy_node_traffic_bindings")) return this.tables.trafficBindings || [];
     if (this.query.includes("FROM proxy_node_tunnel_selections")) return this.tables.tunnelSelections || [];
     if (this.query.includes("FROM tunnels")) {
@@ -310,6 +322,37 @@ describe("subscription generation", () => {
       endpointId: "endpoint_exclusive",
       endpointValue: "192.0.2.10",
       endpointLabel: "exclusive-ip"
+    });
+  });
+
+  it("uses exclusive endpoint scopes even before they are mirrored into node selections", async () => {
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [
+        endpoint,
+        {
+          ...endpoint,
+          id: "endpoint_exclusive",
+          value: "192.0.2.20",
+          label: "exclusive-scope",
+          scope: "node",
+          default_selected: 0,
+          selection_mode: "exclusive"
+        }
+      ],
+      endpointScopes: [{ proxy_node_id: "node_1", endpoint_id: "endpoint_exclusive" }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    expect(generated).toHaveLength(1);
+    expect(generated[0]).toMatchObject({
+      endpointId: "endpoint_exclusive",
+      endpointValue: "192.0.2.20",
+      endpointLabel: "exclusive-scope"
     });
   });
 });

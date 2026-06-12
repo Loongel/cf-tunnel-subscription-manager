@@ -1364,16 +1364,22 @@ async function upsertProxyNodeMutableState(
 
 async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Promise<void> {
   if (Array.isArray(body.selectedEndpointIds)) {
-    await run(env.DB, "DELETE FROM proxy_node_endpoint_selections WHERE proxy_node_id = ?", nodeId);
-    for (const endpointId of body.selectedEndpointIds) {
-      if (typeof endpointId === "string") {
-        await run(
-          env.DB,
-          "INSERT OR REPLACE INTO proxy_node_endpoint_selections (proxy_node_id, endpoint_id, enabled) VALUES (?, ?, 1)",
-          nodeId,
-          endpointId
-        );
-      }
+    await run(
+      env.DB,
+      `DELETE FROM proxy_node_endpoint_selections
+       WHERE proxy_node_id = ?
+         AND endpoint_id IN (
+           SELECT id FROM preferred_endpoints WHERE selection_mode <> 'exclusive'
+         )`,
+      nodeId
+    );
+    for (const endpointId of await additiveNodeScopedEndpointIds(env, body.selectedEndpointIds)) {
+      await run(
+        env.DB,
+        "INSERT OR REPLACE INTO proxy_node_endpoint_selections (proxy_node_id, endpoint_id, enabled) VALUES (?, ?, 1)",
+        nodeId,
+        endpointId
+      );
     }
   }
   if (Array.isArray(body.selectedTunnelIds)
@@ -1404,6 +1410,25 @@ async function replaceNodeLinks(env: Env, nodeId: string, body: JsonRecord): Pro
       );
     }
   }
+}
+
+async function additiveNodeScopedEndpointIds(env: Env, values: unknown[]): Promise<string[]> {
+  const ids = Array.from(new Set(values
+    .filter((id): id is string => typeof id === "string" && id.trim() !== "")
+    .map((id) => id.trim())));
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = await all<{ id: string }>(
+    env.DB,
+    `SELECT id
+     FROM preferred_endpoints
+     WHERE id IN (${placeholders})
+       AND scope = 'node'
+       AND selection_mode <> 'exclusive'`,
+    ...ids
+  );
+  const allowed = new Set(rows.map((row) => row.id));
+  return ids.filter((id) => allowed.has(id));
 }
 
 function selectedTunnelIdsFromBody(body: JsonRecord): string[] {
@@ -1600,16 +1625,45 @@ function endpointSelectionMode(value: unknown, scope: string): PreferredEndpoint
 
 async function replaceEndpointScopes(env: Env, endpointId: string, body: JsonRecord): Promise<void> {
   if (!Array.isArray(body.proxyNodeIds)) return;
+  const endpoint = await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", endpointId);
+  const nodeIds = Array.from(new Set(body.proxyNodeIds
+    .filter((nodeId): nodeId is string => typeof nodeId === "string" && nodeId.trim() !== "")
+    .map((nodeId) => nodeId.trim())));
+  const existingScopes = await all<{ proxy_node_id: string }>(
+    env.DB,
+    "SELECT proxy_node_id FROM preferred_endpoint_node_scopes WHERE endpoint_id = ?",
+    endpointId
+  );
   await run(env.DB, "DELETE FROM preferred_endpoint_node_scopes WHERE endpoint_id = ?", endpointId);
-  for (const nodeId of body.proxyNodeIds) {
-    if (typeof nodeId === "string") {
+  for (const nodeId of nodeIds) {
+    await run(
+      env.DB,
+      "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
+      endpointId,
+      nodeId
+    );
+  }
+  if (endpoint?.scope === "node" && endpoint.selection_mode === "exclusive") {
+    await run(env.DB, "DELETE FROM proxy_node_endpoint_selections WHERE endpoint_id = ?", endpointId);
+    for (const nodeId of nodeIds) {
       await run(
         env.DB,
-        "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
-        endpointId,
-        nodeId
+        "INSERT OR REPLACE INTO proxy_node_endpoint_selections (proxy_node_id, endpoint_id, enabled) VALUES (?, ?, 1)",
+        nodeId,
+        endpointId
       );
     }
+  } else if (existingScopes.length > 0) {
+    const scopedIds = existingScopes.map((row) => row.proxy_node_id);
+    const placeholders = scopedIds.map(() => "?").join(", ");
+    await run(
+      env.DB,
+      `DELETE FROM proxy_node_endpoint_selections
+       WHERE endpoint_id = ?
+         AND proxy_node_id IN (${placeholders})`,
+      endpointId,
+      ...scopedIds
+    );
   }
 }
 
