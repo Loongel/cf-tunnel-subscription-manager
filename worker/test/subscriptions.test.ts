@@ -99,6 +99,7 @@ const endpoint: PreferredEndpointRow = {
   id: "endpoint_1",
   type: "ip",
   value: "104.16.0.1",
+  port: "443",
   label: "cf-ip",
   resolve_mode: "none",
   selection_mode: "additive",
@@ -274,6 +275,7 @@ describe("subscription generation", () => {
         id: "endpoint_redirect",
         type: "domain",
         value: "discovery.example.com",
+        port: null,
         label: "redirect-edge",
         discovery_mode: "redirect"
       }]
@@ -343,6 +345,7 @@ describe("subscription generation", () => {
         id: "endpoint_service_info",
         type: "domain",
         value: "hm-vless.s.gebi.party",
+        port: null,
         label: "service-info",
         discovery_mode: "redirect"
       }]
@@ -382,6 +385,7 @@ describe("subscription generation", () => {
         id: "endpoint_srv",
         type: "domain",
         value: "hm-vless.s.gebi.party",
+        port: null,
         label: "srv-info",
         discovery_mode: "redirect"
       }]

@@ -1698,9 +1698,10 @@ async function createPreferredEndpointForValue(
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
-        label = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
+        label = ?, port = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
+      endpointPort(body.port ?? body.endpointPort, existing.port ?? "443"),
       resolveMode,
       discoveryMode,
       selectionMode,
@@ -1718,12 +1719,13 @@ async function createPreferredEndpointForValue(
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
-      (id, type, value, label, resolve_mode, discovery_mode, selection_mode, enabled, scope, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, type, value, label, port, resolve_mode, discovery_mode, selection_mode, enabled, scope, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     type,
     value,
     optionalString(body.label),
+    endpointPort(body.port ?? body.endpointPort, "443"),
     resolveMode,
     discoveryMode,
     selectionMode,
@@ -1756,11 +1758,12 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
   await run(
     env.DB,
     `UPDATE preferred_endpoints SET
-      type = ?, value = ?, label = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, scope = ?, sort_order = ?, updated_at = ?
+      type = ?, value = ?, label = ?, port = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, scope = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
     type,
     optionalString(body.value) || current.value,
     body.label === null ? null : optionalString(body.label) || current.label,
+    endpointPort(body.port ?? body.endpointPort, current.port ?? "443"),
     resolveMode,
     discoveryMode,
     selectionMode,
@@ -1795,6 +1798,16 @@ function endpointResolveMode(value: unknown, type: string): PreferredEndpointRow
   if (type !== "domain") return "none";
   if (value === "ipv4" || value === "ipv6") return value;
   return "none";
+}
+
+function endpointPort(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  const port = optionalString(value);
+  if (!port) return null;
+  if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+    throw new HttpError(400, "port must be blank or a number from 1 to 65535");
+  }
+  return port;
 }
 
 function endpointSelectionMode(value: unknown, scope: string): PreferredEndpointRow["selection_mode"] {

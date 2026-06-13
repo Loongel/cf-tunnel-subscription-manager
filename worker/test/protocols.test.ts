@@ -22,6 +22,7 @@ const endpoint: PreferredEndpointRow = {
   id: "endpoint_1",
   type: "ip",
   value: "162.159.1.1",
+  port: "443",
   label: "CF IP A",
   resolve_mode: "none",
   selection_mode: "additive",
@@ -60,6 +61,19 @@ describe("protocol adapter", () => {
     expect(parsed.hostname).toBe("162.159.1.1");
     expect(parsed.port).toBe("443");
     expect(parsed.searchParams.get("sni")).toBe("edge.example.com");
+  });
+
+  it("keeps the source port when endpoint port is blank", () => {
+    const raw = "vless://uuid@example.com:1443?type=ws&security=tls&sni=edge.example.com&host=edge.example.com&path=%2F#old";
+    const result = mutateShareUri(raw, {
+      node: { ...node(raw) },
+      endpoint: { ...endpoint, port: null },
+      format: "v2ray"
+    });
+    expect(result.skipped).toBeFalsy();
+    const parsed = new URL(result.uri || "");
+    expect(parsed.hostname).toBe("162.159.1.1");
+    expect(parsed.port).toBe("1443");
   });
 
   it("wraps IPv6 endpoint addresses in share-link URL authority hosts", () => {

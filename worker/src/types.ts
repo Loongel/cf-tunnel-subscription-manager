@@ -89,6 +89,7 @@ export interface PreferredEndpointRow {
   id: string;
   type: "ip" | "domain";
   value: string;
+  port?: string | null;
   label: string | null;
   resolve_mode: "none" | "ipv4" | "ipv6";
   discovery_mode?: "static" | "redirect";

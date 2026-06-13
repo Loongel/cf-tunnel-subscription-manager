@@ -415,6 +415,7 @@ export function renderAdminUi(env: Env): string {
           <label>Domain Resolve<select id="endpointResolveMode"><option value="none">Do Not Resolve</option><option value="ipv4">Resolve IPv4</option><option value="ipv6">Resolve IPv6</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
+          <label>Port<input id="endpointPort" inputmode="numeric" placeholder="keep original" value="443"></label>
           <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com&#10;https://discovery.example.com"></textarea></label>
           <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
           <div id="endpointNodePicker" class="subpanel full hidden">
@@ -899,10 +900,14 @@ export function renderAdminUi(env: Env): string {
     }
     function endpointValueCell(row) {
       const label = endpointListLabel(row);
+      const port = '<br><span class="muted">' + esc(endpointPortLabel(row)) + '</span>';
       if (row.label && row.label !== row.value) {
-        return '<strong>' + esc(label) + '</strong><br><span class="muted">' + esc(row.value || '') + '</span>';
+        return '<strong>' + esc(label) + '</strong><br><span class="muted">' + esc(row.value || '') + '</span>' + port;
       }
-      return esc(row.value || '');
+      return esc(row.value || '') + port;
+    }
+    function endpointPortLabel(row) {
+      return row.port ? 'Port: ' + row.port : 'Port: keep original';
     }
     function endpointRoleLabel(row) {
       if (row.scope === 'global') return 'Global Always On';
@@ -1159,6 +1164,7 @@ export function renderAdminUi(env: Env): string {
       byId('endpointEnabled').value = 'true';
       byId('endpointValues').value = '';
       byId('endpointLabel').value = '';
+      byId('endpointPort').value = '443';
       byId('endpointSort').value = '0';
       byId('endpointNodeFilter').value = '';
       byId('endpointNodeStatus').value = 'all';
@@ -1548,6 +1554,7 @@ export function renderAdminUi(env: Env): string {
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
             byId('endpointValues').value = row.value || '';
             byId('endpointLabel').value = row.label || '';
+            byId('endpointPort').value = row.port == null ? '' : String(row.port);
             byId('endpointSort').value = String(row.sort_order || 0);
             renderEndpointNodeOptions();
             markEndpointNodes(linkedNodeIds);
@@ -1850,6 +1857,7 @@ export function renderAdminUi(env: Env): string {
           discoveryMode: endpointType === 'redirect' ? 'redirect' : 'static',
           resolveMode: byId('endpointResolveMode').value,
           label: byId('endpointLabel').value,
+          port: byId('endpointPort').value,
           scope: role === 'exclusive' ? 'node' : role,
           selectionMode: role === 'exclusive' ? 'exclusive' : 'additive',
           enabled: byId('endpointEnabled').value === 'true',

@@ -102,8 +102,11 @@ function urlHostname(server: string): string {
 }
 
 function targetPort(rawPort: string | null, ctx: MutationContext): string {
+  const configuredEndpointPort = ctx.endpoint?.port?.trim();
+  if (configuredEndpointPort) return configuredEndpointPort;
   const endpointPort = endpointTarget(ctx)?.port;
   if (endpointPort) return endpointPort;
+  if (ctx.endpoint) return rawPort && rawPort !== "" ? rawPort : "443";
   if (hasEdgeOverride(ctx)) return "443";
   return rawPort && rawPort !== "" ? rawPort : "443";
 }
