@@ -891,6 +891,9 @@ export function renderAdminUi(env: Env): string {
       if (row.selection_mode === 'exclusive') return 'Exclusive Binding Option';
       return 'Binding Option';
     }
+    function endpointRoleUsesNodes(role) {
+      return role === 'exclusive' || role === 'global';
+    }
     function syncEndpointResolveModeControl() {
       const isDomain = byId('endpointType').value === 'domain';
       byId('endpointResolveMode').disabled = !isDomain;
@@ -898,7 +901,7 @@ export function renderAdminUi(env: Env): string {
     }
     function syncEndpointNodeControl() {
       const role = byId('endpointRole').value;
-      const usesNodes = role === 'exclusive' || role === 'global';
+      const usesNodes = endpointRoleUsesNodes(role);
       byId('endpointNodePickerTitle').textContent = role === 'global' ? 'Excluded Nodes' : 'Exclusive Nodes';
       byId('endpointNodePicker').classList.toggle('hidden', !usesNodes);
       byId('endpointNodeIds').disabled = !usesNodes;
@@ -1506,6 +1509,14 @@ export function renderAdminUi(env: Env): string {
           if (row) {
             editingEndpointId = row.id;
             editingEndpointOriginalRole = row.scope === 'node' && row.selection_mode === 'exclusive' ? 'exclusive' : (row.scope || 'global');
+            const linkedNodeIds = row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : (row.scope === 'global' ? (row.excludedProxyNodeIds || []) : []);
+            if (endpointRoleUsesNodes(editingEndpointOriginalRole) && state.nodes.length === 0) {
+              await refreshNodes();
+            }
+            if (linkedNodeIds.length > 0 && state.nodes.length === 0) {
+              setNotice('Nodes failed to load, so endpoint node links cannot be edited safely.', 'error');
+              return;
+            }
             endpointNodeSelectionTouched = false;
             byId('createEndpoint').textContent = 'Save Endpoint';
             byId('endpointType').value = endpointTypeValue(row);
@@ -1516,7 +1527,7 @@ export function renderAdminUi(env: Env): string {
             byId('endpointLabel').value = row.label || '';
             byId('endpointSort').value = String(row.sort_order || 0);
             renderEndpointNodeOptions();
-            markEndpointNodes(row.selection_mode === 'exclusive' ? (row.proxyNodeIds || []) : (row.scope === 'global' ? (row.excludedProxyNodeIds || []) : []));
+            markEndpointNodes(linkedNodeIds);
             syncEndpointResolveModeControl();
             syncEndpointNodeControl();
           }
@@ -1822,6 +1833,9 @@ export function renderAdminUi(env: Env): string {
           sortOrder: Number(byId('endpointSort').value || 0)
         };
         if (!editingEndpointId || endpointNodeSelectionTouched || role !== editingEndpointOriginalRole) {
+          if (endpointRoleUsesNodes(role) && state.nodes.length === 0) {
+            throw new Error('Nodes are not loaded. Refresh proxy nodes before saving endpoint node links.');
+          }
           body.proxyNodeIds = role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : [];
           body.excludedProxyNodeIds = role === 'global' ? selectedValues(byId('endpointNodeIds')) : [];
         }
