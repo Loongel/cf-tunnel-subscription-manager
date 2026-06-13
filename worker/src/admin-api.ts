@@ -416,6 +416,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   }
 
   const deletedStateByImportKey = importStateByDeletedImportKey(deletedRows);
+  const deletedStateByName = importStateByDeletedName(deletedRows);
 
   for (const item of activeCandidates) {
     const name = item.name.trim();
@@ -462,7 +463,8 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     const item = variant.item;
     try {
       const stableId = await stableImportedNodeId(variant.identity.importKey);
-      const restoredState = deletedStateByImportKey.get(variant.identity.importKey);
+      const restoredState = deletedStateByImportKey.get(variant.identity.importKey)
+        || deletedStateByName.get(variant.name);
       const restoredEndpointIds = restoredState?.selectedEndpointIds || [];
       newIdsByImportKey.set(variant.identity.importKey, stableId);
       const payload = {
@@ -705,6 +707,22 @@ function importStateByDeletedImportKey(rows: DeletedImportedNodeRow[]): Map<stri
   return output;
 }
 
+function importStateByDeletedName(rows: DeletedImportedNodeRow[]): Map<string, DeletedImportedNodeRow> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const output = new Map<string, DeletedImportedNodeRow>();
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (!name || counts.get(name) !== 1) continue;
+    output.set(name, row);
+  }
+  return output;
+}
+
 function displayNameForImportCandidate(
   candidate: ImportCandidate,
   deletedStateByImportKey: Map<string, DeletedImportedNodeRow>
@@ -894,7 +912,8 @@ async function migrateGlobalEndpointExclusions(
 }
 
 export const __adminApiTestHooks = {
-  importProxyNodes
+  importProxyNodes,
+  normalizeImportRulesForCandidates
 };
 
 async function previewProxyNodeImport(env: Env, body: JsonRecord): Promise<{
@@ -1059,6 +1078,104 @@ function currentImportRules(rules: JsonRecord): JsonRecord {
   return importRulesFromBody({ rules });
 }
 
+async function normalizeImportRulesForCandidates(
+  env: Env,
+  candidates: ImportCandidate[],
+  rules: JsonRecord
+): Promise<JsonRecord> {
+  const candidateKeys = new Set(candidates.map((item) => item.importKey).filter(Boolean));
+  const missingKeys = importRuleKeys(rules).filter((key) => !candidateKeys.has(key));
+  if (missingKeys.length === 0) return rules;
+
+  const keyMap = await importRuleKeyMapByMutableName(env, candidates, missingKeys);
+  if (keyMap.size === 0) return rules;
+
+  const remapKey = (key: string): string => keyMap.get(key) || key;
+  const parentKeysByKey: JsonRecord = {};
+  const rawParents = isRecord(rules.parentKeysByKey) ? rules.parentKeysByKey as JsonRecord : {};
+  for (const [key, value] of Object.entries(rawParents)) {
+    const mappedKey = remapKey(key);
+    const mappedParents = uniqueStrings(stringArray(value).map(remapKey));
+    if (mappedParents.length > 0) parentKeysByKey[mappedKey] = mappedParents;
+  }
+
+  const displayNamesByKey: JsonRecord = {};
+  const rawDisplayNames = isRecord(rules.displayNamesByKey) ? rules.displayNamesByKey as JsonRecord : {};
+  for (const [key, value] of Object.entries(rawDisplayNames)) {
+    if (typeof value === "string" && value.trim()) displayNamesByKey[remapKey(key)] = value.trim();
+  }
+
+  return {
+    ...rules,
+    removedKeys: uniqueStrings(stringArray(rules.removedKeys).map(remapKey)),
+    carrierKeys: uniqueStrings(stringArray(rules.carrierKeys).map(remapKey)),
+    parentKeysByKey,
+    displayNamesByKey
+  };
+}
+
+function importRuleKeys(rules: JsonRecord): string[] {
+  const keys: string[] = [
+    ...stringArray(rules.removedKeys),
+    ...stringArray(rules.carrierKeys)
+  ];
+  const parentKeysByKey = isRecord(rules.parentKeysByKey) ? rules.parentKeysByKey as JsonRecord : {};
+  for (const [key, value] of Object.entries(parentKeysByKey)) {
+    keys.push(key, ...stringArray(value));
+  }
+  const displayNamesByKey = isRecord(rules.displayNamesByKey) ? rules.displayNamesByKey as JsonRecord : {};
+  keys.push(...Object.keys(displayNamesByKey));
+  return uniqueStrings(keys);
+}
+
+async function importRuleKeyMapByMutableName(
+  env: Env,
+  candidates: ImportCandidate[],
+  missingKeys: string[]
+): Promise<Map<string, string>> {
+  const placeholders = missingKeys.map(() => "?").join(", ");
+  const rows = await all<{ import_key: string; name: string | null }>(
+    env.DB,
+    `SELECT import_key, name
+     FROM proxy_node_mutable_state
+     WHERE import_key IN (${placeholders})`,
+    ...missingKeys
+  );
+  if (rows.length === 0) return new Map();
+
+  const candidatesByName = uniqueImportCandidatesByName(candidates);
+  const output = new Map<string, string>();
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (!name) continue;
+    const candidate = candidatesByName.get(name);
+    if (candidate?.importKey && candidate.importKey !== row.import_key) {
+      output.set(row.import_key, candidate.importKey);
+    }
+  }
+  return output;
+}
+
+function uniqueImportCandidatesByName(candidates: ImportCandidate[]): Map<string, ImportCandidate> {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const name = candidate.name?.trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const output = new Map<string, ImportCandidate>();
+  for (const candidate of candidates) {
+    const name = candidate.name?.trim();
+    if (!name || counts.get(name) !== 1) continue;
+    output.set(name, candidate);
+  }
+  return output;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim());
@@ -1218,11 +1335,12 @@ async function updateImportSource(env: Env, id: string, body: JsonRecord): Promi
   return await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
 }
 
-async function previewImportSource(env: Env, id: string): Promise<{ candidates: ImportCandidate[]; errors: string[] }> {
+async function previewImportSource(env: Env, id: string): Promise<{ candidates: ImportCandidate[]; errors: string[]; rules: JsonRecord }> {
   const source = await first<ImportSourceRow>(env.DB, "SELECT * FROM import_sources WHERE id = ?", id);
   if (!source) throw new HttpError(404, "import source not found");
   const built = await buildImportCandidates(env, importSourceBody(source));
-  return { ...built, candidates: applyImportRules(built.candidates, currentImportRules(parseJsonObject(source.rules_json))) };
+  const rules = await normalizeImportRulesForCandidates(env, built.candidates, currentImportRules(parseJsonObject(source.rules_json)));
+  return { ...built, rules, candidates: applyImportRules(built.candidates, rules) };
 }
 
 export async function refreshEnabledImportSources(env: Env): Promise<void> {
@@ -1260,7 +1378,7 @@ async function refreshImportSource(env: Env, id: string, mode: "manual" | "cron"
     await run(
       env.DB,
       "UPDATE import_sources SET rules_json = ?, last_fetched_at = ?, last_imported_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
-      safeJson(currentImportRules(parseJsonObject(source.rules_json))),
+      safeJson(preview.rules),
       nowIso(),
       nowIso(),
       nowIso(),

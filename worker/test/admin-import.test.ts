@@ -7,6 +7,7 @@ type TrafficBinding = { proxy_node_id: string; traffic_key: string; enabled: num
 type SniSelection = { proxy_node_id: string; sni_id: string; enabled: number };
 type EndpointScope = { proxy_node_id: string; endpoint_id: string };
 type EndpointExclusion = { proxy_node_id: string; endpoint_id: string };
+type MutableState = { import_key: string; name: string | null; remark?: string | null; enabled?: number | null };
 
 type TableMap = {
   nodes: ProxyNodeRow[];
@@ -16,6 +17,7 @@ type TableMap = {
   endpointExclusions?: EndpointExclusion[];
   trafficBindings?: TrafficBinding[];
   sniSelections?: SniSelection[];
+  mutableStates?: MutableState[];
 };
 
 class MockStatement {
@@ -216,6 +218,11 @@ class MockStatement {
     }
     if (this.query.includes("SELECT import_key FROM proxy_nodes")) {
       return this.tables.nodes.map((row) => ({ import_key: row.import_key || null }));
+    }
+    if (this.query.includes("FROM proxy_node_mutable_state")
+      && this.query.includes("WHERE import_key IN")) {
+      const keys = new Set(this.params.map(String));
+      return (this.tables.mutableStates || []).filter((row) => keys.has(row.import_key));
     }
     return [];
   }
@@ -442,6 +449,107 @@ describe("admin import refresh", () => {
     expect(tables.sniSelections).toEqual([
       { proxy_node_id: tables.nodes[0].id, sni_id: "sni_1", enabled: 1 }
     ]);
+  });
+
+  it("preserves traffic bindings by unique display name when fallback carrier identity changes", async () => {
+    const oldNode = node(
+      "old_child",
+      "node-c <tls-entry>",
+      "managed-sub",
+      "vless://00000000-0000-4000-8000-000000000004@old-carrier.example:443?security=tls&type=ws&sni=old-carrier.example#child",
+      "oldfallback"
+    );
+    oldNode.import_key = "import:v1:managed-sub:oldfallback";
+    oldNode.import_source_name = "managed-sub";
+    const tables: TableMap = {
+      nodes: [oldNode],
+      endpoints: [],
+      endpointSelections: [],
+      trafficBindings: [{ proxy_node_id: "old_child", traffic_key: "swarm:wawo01|target:http://s-ui:80", enabled: 1 }]
+    };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "managed-sub",
+      replaceExistingForRemark: true,
+      candidates: [
+        {
+          id: "carrier",
+          sourceName: "managed-sub",
+          sourceGroup: "managed-sub",
+          sourceType: "v2ray_uri",
+          name: "tls-entry",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000003@new-carrier.example:443?security=tls&type=ws&sni=new-carrier.example#carrier",
+          protocol: "vless",
+          asTlsCarrier: true
+        },
+        {
+          id: "child",
+          sourceName: "managed-sub",
+          sourceGroup: "managed-sub",
+          sourceType: "v2ray_uri",
+          name: "node-c",
+          rawConfig: "vless://00000000-0000-4000-8000-000000000004@origin.example:80?type=ws#child",
+          protocol: "vless",
+          parentIds: ["carrier"]
+        }
+      ]
+    });
+
+    const importedChild = tables.nodes.find((row) => row.name === "node-c <tls-entry>");
+    expect(result).toMatchObject({ imported: 2, deletedOld: 1, skipped: 0 });
+    expect(importedChild).toBeTruthy();
+    expect(tables.trafficBindings).toEqual([
+      { proxy_node_id: importedChild?.id, traffic_key: "swarm:wawo01|target:http://s-ui:80", enabled: 1 }
+    ]);
+  });
+
+  it("remaps stale TLS carrier rule keys by mutable display name", async () => {
+    const oldCarrierKey = "import:v1:managed-sub:oldcarrier";
+    const newCarrierKey = "import:v1:managed-sub:newcarrier";
+    const childKey = "import:v1:managed-sub:child";
+    const tables: TableMap = {
+      nodes: [],
+      endpoints: [],
+      endpointSelections: [],
+      mutableStates: [{ import_key: oldCarrierKey, name: "tls-entry", enabled: 0 }]
+    };
+
+    const rules = await __adminApiTestHooks.normalizeImportRulesForCandidates(env(tables), [
+      {
+        id: "carrier",
+        name: "tls-entry",
+        originalName: "tls-entry",
+        sourceName: "managed-sub",
+        sourceGroup: "managed-sub",
+        rawConfig: "carrier",
+        importKey: newCarrierKey,
+        contentHash: "newcarrier",
+        sourceType: "v2ray_uri",
+        protocol: "vless",
+        tls: true,
+        duplicate: false
+      },
+      {
+        id: "child",
+        name: "node-c",
+        originalName: "node-c",
+        sourceName: "managed-sub",
+        sourceGroup: "managed-sub",
+        rawConfig: "child",
+        importKey: childKey,
+        contentHash: "child",
+        sourceType: "v2ray_uri",
+        protocol: "vless",
+        tls: false,
+        duplicate: false
+      }
+    ], {
+      carrierKeys: [oldCarrierKey],
+      parentKeysByKey: { [childKey]: [oldCarrierKey] }
+    });
+
+    expect(rules.carrierKeys).toEqual([newCarrierKey]);
+    expect(rules.parentKeysByKey).toEqual({ [childKey]: [newCarrierKey] });
   });
 
   it("imports same-name nodes when their raw configs differ", async () => {
