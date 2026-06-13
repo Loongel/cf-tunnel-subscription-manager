@@ -12,6 +12,7 @@ import { getSubscriptionToken, rotateSubscriptionToken, subscriptionUrls } from 
 import { listGeneratedNodes, parseSubscriptionOptions, previewSubscription } from "./subscriptions";
 import { cleanupStaleTunnels, tunnelTrafficKey, tunnelTrafficLabel } from "./tunnel-registry";
 import type { CustomSniRow, Env, ImportSourceRow, JsonRecord, JsonValue, PreferredEndpointRow, ProxyNodeRow, SubscriptionOptions, TunnelRow } from "./types";
+import { APP_NAME, APP_VERSION, DB_EXPORT_SCHEMA_VERSION } from "./version";
 import {
   boolToInt,
   empty,
@@ -65,6 +66,29 @@ interface ImportVariant {
   };
 }
 
+const DB_EXPORT_TABLES = [
+  "agents",
+  "tunnels",
+  "commands",
+  "proxy_nodes",
+  "preferred_endpoints",
+  "groups",
+  "tunnel_events",
+  "settings",
+  "custom_snis",
+  "import_sources",
+  "proxy_node_mutable_state",
+  "preferred_endpoint_node_scopes",
+  "preferred_endpoint_node_exclusions",
+  "proxy_node_endpoint_selections",
+  "proxy_node_sni_selections",
+  "proxy_node_traffic_bindings"
+] as const;
+
+const DB_IMPORT_DELETE_ORDER = [...DB_EXPORT_TABLES].reverse();
+
+type DbExportTable = typeof DB_EXPORT_TABLES[number];
+
 export async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Response> {
   const path = url.pathname;
   if (request.method === "GET" && path === "/api/public/overview") {
@@ -79,6 +103,15 @@ export async function handleAdminApi(request: Request, env: Env, url: URL): Prom
 
   if (request.method === "GET" && path === "/api/admin/overview") {
     return json(await overview(env, true));
+  }
+  if (request.method === "GET" && path === "/api/admin/maintenance") {
+    return json(await maintenanceInfo(env));
+  }
+  if (request.method === "GET" && path === "/api/admin/maintenance/export") {
+    return exportDatabase(env);
+  }
+  if (request.method === "POST" && path === "/api/admin/maintenance/import") {
+    return json(await importDatabase(env, await readJson(request)));
   }
   if (request.method === "GET" && path === "/api/admin/agents") {
     return json({ agents: await all(env.DB, "SELECT * FROM agents ORDER BY last_seen_at DESC") });
@@ -307,6 +340,97 @@ async function overview(env: Env, includePrivate: boolean): Promise<unknown> {
     recentEvents: recent,
     subscriptionUrls: subscriptionUrls(env.PUBLIC_BASE_URL || "", token)
   };
+}
+
+async function maintenanceInfo(env: Env): Promise<unknown> {
+  return {
+    app: {
+      name: APP_NAME,
+      version: APP_VERSION,
+      dbExportSchemaVersion: DB_EXPORT_SCHEMA_VERSION
+    },
+    database: {
+      checkedAt: nowIso(),
+      tables: await databaseTableCounts(env)
+    }
+  };
+}
+
+async function databaseTableCounts(env: Env): Promise<Array<{ table: string; rows: number }>> {
+  const output: Array<{ table: string; rows: number }> = [];
+  for (const table of DB_EXPORT_TABLES) {
+    const row = await first<{ total: number }>(env.DB, `SELECT COUNT(*) AS total FROM ${table}`);
+    output.push({ table, rows: row?.total || 0 });
+  }
+  return output;
+}
+
+async function exportDatabase(env: Env): Promise<Response> {
+  const tables: Record<string, unknown[]> = {};
+  for (const table of DB_EXPORT_TABLES) {
+    tables[table] = await all(env.DB, `SELECT * FROM ${table}`);
+  }
+  const payload = {
+    kind: "cf-tunnel-subscription-manager-db-export",
+    app: APP_NAME,
+    appVersion: APP_VERSION,
+    schemaVersion: DB_EXPORT_SCHEMA_VERSION,
+    exportedAt: nowIso(),
+    tables
+  };
+  const filename = `cf-tunnel-subscription-manager-db-${new Date().toISOString().replace(/[:.]/g, "").replace("T", "-").replace("Z", "Z")}.json`;
+  return json(payload, {
+    headers: {
+      "content-disposition": `attachment; filename="${filename}"`
+    }
+  });
+}
+
+async function importDatabase(env: Env, body: JsonRecord): Promise<unknown> {
+  if (body.confirm !== "IMPORT_DATABASE") {
+    throw new HttpError(400, "confirmation phrase IMPORT_DATABASE is required");
+  }
+  const tables = body.tables;
+  if (!tables || typeof tables !== "object" || Array.isArray(tables)) {
+    throw new HttpError(400, "tables object is required");
+  }
+  const records = tables as Record<string, unknown>;
+  for (const table of DB_EXPORT_TABLES) {
+    if (!Array.isArray(records[table])) throw new HttpError(400, `table ${table} must be an array`);
+  }
+
+  for (const table of DB_IMPORT_DELETE_ORDER) {
+    await run(env.DB, `DELETE FROM ${table}`);
+  }
+  for (const table of DB_EXPORT_TABLES) {
+    await importTableRows(env, table, records[table] as unknown[]);
+  }
+  return {
+    importedAt: nowIso(),
+    tables: await databaseTableCounts(env)
+  };
+}
+
+async function importTableRows(env: Env, table: DbExportTable, rows: unknown[]): Promise<void> {
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new HttpError(400, `invalid row in ${table}`);
+    }
+    const record = row as Record<string, unknown>;
+    const columns = Object.keys(record);
+    if (columns.length === 0) continue;
+    const placeholders = columns.map(() => "?").join(", ");
+    const columnSql = columns.map((column) => quoteIdentifier(column)).join(", ");
+    await run(
+      env.DB,
+      `INSERT INTO ${table} (${columnSql}) VALUES (${placeholders})`,
+      ...columns.map((column) => record[column])
+    );
+  }
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, "\"\"")}"`;
 }
 
 async function createRestartCommand(env: Env, tunnelId: string, createdBy: "admin" | "cron" | "system"): Promise<Response> {

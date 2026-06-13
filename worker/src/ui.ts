@@ -112,7 +112,9 @@ export function renderAdminUi(env: Env): string {
     pre { white-space: pre-wrap; overflow: auto; max-height: 520px; }
     .brand { display: flex; align-items: center; gap: 10px; }
     .brandmark { width: 26px; height: 26px; border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; color: #dbeafe; background: rgba(96, 165, 250, 0.12); font-size: 14px; }
-    .tokenbar { display: grid; grid-template-columns: minmax(220px, 430px) auto auto; gap: 8px; align-items: center; }
+    .tokenbar { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+    .tokenbar input { width: min(430px, 56vw); }
+    .auth-status { color: var(--muted); font-size: 12px; }
     .notice { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; background: rgba(20, 28, 44, 0.88); color: var(--muted); min-height: 38px; }
     .notice {
       position: fixed;
@@ -241,6 +243,7 @@ export function renderAdminUi(env: Env): string {
     <div class="tokenbar">
       <input id="tokenInput" type="password" autocomplete="off" placeholder="Admin token">
       <button id="saveToken" class="primary">Login</button>
+      <span id="authStatus" class="auth-status hidden">Signed in</span>
       <button id="clearToken">Logout</button>
     </div>
   </header>
@@ -253,6 +256,7 @@ export function renderAdminUi(env: Env): string {
       <button data-tab="nodes">Proxy Nodes</button>
       <button data-tab="endpoints">Preferred Endpoints</button>
       <button data-tab="subscriptions">Subscriptions</button>
+      <button data-tab="maintenance">Maintenance</button>
     </nav>
 
     <section id="dashboard" class="view">
@@ -493,11 +497,44 @@ export function renderAdminUi(env: Env): string {
         </div>
       </div>
     </section>
+
+    <section id="maintenance" class="view hidden">
+      <div class="section">
+        <div class="toolbar">
+          <h2>Maintenance</h2>
+          <button id="refreshMaintenance">Refresh</button>
+        </div>
+        <div class="grid metrics">
+          <div class="metric"><div class="muted">Application</div><div id="maintenanceAppName" class="value small">-</div></div>
+          <div class="metric"><div class="muted">Version</div><div id="maintenanceVersion" class="value">-</div></div>
+          <div class="metric"><div class="muted">Export Schema</div><div id="maintenanceSchema" class="value">-</div></div>
+          <div class="metric"><div class="muted">Checked At</div><div id="maintenanceCheckedAt" class="value small">-</div></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="toolbar">
+          <h2>Database Export / Import</h2>
+          <div class="actions"><button id="exportDatabase" class="primary">Export JSON</button></div>
+        </div>
+        <div class="subpanel">
+          <div class="formgrid">
+            <label class="wide">Import JSON<input id="importDatabaseFile" type="file" accept="application/json,.json"></label>
+            <label>Confirm<input id="importDatabaseConfirm" placeholder="IMPORT_DATABASE"></label>
+            <div class="actions"><button id="importDatabase" class="danger">Import Database</button></div>
+          </div>
+          <p class="muted small">Import replaces the managed business tables with the selected JSON export. Create or download a backup before importing.</p>
+        </div>
+      </div>
+      <div class="section">
+        <div class="toolbar"><h2>Tables</h2></div>
+        <table><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody id="maintenanceTablesBody"></tbody></table>
+      </div>
+    </section>
   </main>
 
   <script>
     const BASE_URL = ${JSON.stringify(baseUrl)};
-    const state = { overview: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [], agents: [] };
+    const state = { overview: null, maintenance: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [], agents: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
     let editingEndpointOriginalRole = null;
@@ -510,6 +547,9 @@ export function renderAdminUi(env: Env): string {
 
     const byId = (id) => document.getElementById(id);
     const tokenInput = byId('tokenInput');
+    const saveTokenButton = byId('saveToken');
+    const clearTokenButton = byId('clearToken');
+    const authStatus = byId('authStatus');
     const notice = byId('notice');
     const noticeText = byId('noticeText');
     const metricAgents = byId('metricAgents');
@@ -524,6 +564,7 @@ export function renderAdminUi(env: Env): string {
     const endpointsBody = byId('endpointsBody');
     const importSourcesBody = byId('importSourcesBody');
     const groupsBody = byId('groupsBody');
+    const maintenanceTablesBody = byId('maintenanceTablesBody');
     const subscriptionLinks = byId('subscriptionLinks');
     const previewOutput = byId('previewOutput');
 
@@ -557,6 +598,13 @@ export function renderAdminUi(env: Env): string {
     }
     function selectedValues(el) { return Array.from(el.selectedOptions).map((o) => o.value).filter(Boolean); }
     function unique(values) { return Array.from(new Set(values.filter(Boolean))); }
+    function updateAuthControls() {
+      const authed = hasToken();
+      tokenInput.classList.toggle('hidden', authed);
+      saveTokenButton.classList.toggle('hidden', authed);
+      authStatus.classList.toggle('hidden', !authed);
+      clearTokenButton.classList.toggle('hidden', !authed);
+    }
     function statusPill(value) {
       const clean = String(value || 'unknown');
       return '<span class="status ' + esc(clean) + '">' + esc(clean) + '</span>';
@@ -591,8 +639,10 @@ export function renderAdminUi(env: Env): string {
       nodesBody.innerHTML = lockedRow(6);
       endpointsBody.innerHTML = lockedRow(7);
       groupsBody.innerHTML = lockedRow(4);
+      maintenanceTablesBody.innerHTML = lockedRow(2);
       subscriptionLinks.innerHTML = '<div class="muted small">Login required.</div>';
       previewOutput.textContent = '';
+      state.maintenance = null;
       state.tunnels = [];
       state.snis = [];
       state.nodes = [];
@@ -605,6 +655,7 @@ export function renderAdminUi(env: Env): string {
       renderBindingNodeList();
       renderEndpointOptions();
       renderGeneratedNodeOptions();
+      renderMaintenance();
       snisBody.innerHTML = lockedRow(4);
       importSourcesBody.innerHTML = lockedRow(5);
     }
@@ -637,6 +688,11 @@ export function renderAdminUi(env: Env): string {
         '<tr><td>' + esc(row.created_at) + '</td><td>' + statusPill(row.severity) + '</td><td>' + esc(row.event_type) + '</td><td>' + esc(row.message) + '</td></tr>'
       ).join('') || '<tr><td colspan="4" class="muted">No events.</td></tr>';
       renderSubscriptionLinks();
+    }
+    async function refreshMaintenance() {
+      const data = await api('/api/admin/maintenance');
+      state.maintenance = data;
+      renderMaintenance();
     }
     async function refreshTunnels() {
       const data = await api('/api/admin/tunnels');
@@ -1014,6 +1070,47 @@ export function renderAdminUi(env: Env): string {
         }).join('');
         return '<div class="link-chip-row"><strong>' + esc(formatName) + '</strong><div class="link-chips">' + chips + '</div></div>';
       }).join('');
+    }
+    function renderMaintenance() {
+      const data = state.maintenance || {};
+      const app = data.app || {};
+      const db = data.database || {};
+      byId('maintenanceAppName').textContent = app.name || '-';
+      byId('maintenanceVersion').textContent = app.version || '-';
+      byId('maintenanceSchema').textContent = app.dbExportSchemaVersion == null ? '-' : String(app.dbExportSchemaVersion);
+      byId('maintenanceCheckedAt').textContent = db.checkedAt || '-';
+      const rows = db.tables || [];
+      maintenanceTablesBody.innerHTML = rows.map((row) =>
+        '<tr><td class="mono">' + esc(row.table) + '</td><td>' + esc(row.rows) + '</td></tr>'
+      ).join('') || '<tr><td colspan="2" class="muted">Login required.</td></tr>';
+    }
+    function filenameFromDisposition(value) {
+      const match = /filename="?([^";]+)"?/i.exec(value || '');
+      return match ? match[1] : 'cf-tunnel-subscription-manager-db.json';
+    }
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+    async function exportDatabaseJson() {
+      const res = await fetch('/api/admin/maintenance/export', { headers: authHeaders() });
+      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      downloadBlob(await res.blob(), filenameFromDisposition(res.headers.get('content-disposition')));
+    }
+    async function importDatabaseJson() {
+      const file = byId('importDatabaseFile').files[0];
+      if (!file) throw new Error('Choose a database JSON export first.');
+      const confirm = byId('importDatabaseConfirm').value.trim();
+      if (confirm !== 'IMPORT_DATABASE') throw new Error('Type IMPORT_DATABASE to confirm replacement.');
+      const payload = JSON.parse(await file.text());
+      payload.confirm = confirm;
+      await api('/api/admin/maintenance/import', { method: 'POST', body: JSON.stringify(payload) });
     }
     function absoluteSubscriptionUrl(url) {
       const base = BASE_URL || location.origin;
@@ -1620,12 +1717,26 @@ export function renderAdminUi(env: Env): string {
     });
 
     byId('saveToken').onclick = async () => {
-      localStorage.setItem('adminToken', tokenInput.value.trim());
-      await refreshAll(true);
+      try {
+        const token = tokenInput.value.trim();
+        if (!token) throw new Error('Enter the admin token.');
+        const res = await fetch('/api/admin/overview', {
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
+        });
+        if (!res.ok) throw new Error((await res.text()) || res.statusText);
+        localStorage.setItem('adminToken', token);
+        updateAuthControls();
+        await refreshAll(true);
+      } catch (err) {
+        localStorage.removeItem('adminToken');
+        updateAuthControls();
+        setNotice(formatError(err), 'error');
+      }
     };
     byId('clearToken').onclick = async () => {
       localStorage.removeItem('adminToken');
       tokenInput.value = '';
+      updateAuthControls();
       await refreshAll();
       setNotice('Logged out. Public status remains visible.', 'warn');
     };
@@ -1965,6 +2076,26 @@ export function renderAdminUi(env: Env): string {
       try { await refreshEndpoints(); await refreshGeneratedNodes(); } catch (err) { setNotice(formatError(err), 'error'); }
     };
     byId('refreshImportSources').onclick = () => refreshImportSources().catch((err) => setNotice(formatError(err), 'error'));
+    byId('refreshMaintenance').onclick = () => refreshMaintenance().catch((err) => setNotice(formatError(err), 'error'));
+    byId('exportDatabase').onclick = async () => {
+      try {
+        await exportDatabaseJson();
+        setNotice('Database export downloaded.', 'ok');
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
+    byId('importDatabase').onclick = async () => {
+      try {
+        await importDatabaseJson();
+        byId('importDatabaseFile').value = '';
+        byId('importDatabaseConfirm').value = '';
+        setNotice('Database import completed.', 'ok');
+        await refreshAll(true);
+      } catch (err) {
+        setNotice(formatError(err), 'error');
+      }
+    };
 
     async function refreshAll(fromLogin) {
       try {
@@ -1987,6 +2118,7 @@ export function renderAdminUi(env: Env): string {
         await refreshImportSources();
         await refreshGeneratedNodes();
         await refreshGroups();
+        await refreshMaintenance();
         if (fromLogin) setNotice('Signed in.', 'ok');
       } catch (err) {
         clearPrivateViews();
@@ -1996,6 +2128,7 @@ export function renderAdminUi(env: Env): string {
 
     syncEndpointTypeControls();
     syncEndpointNodeControl();
+    updateAuthControls();
     refreshAll(false);
   </script>
 </body>
