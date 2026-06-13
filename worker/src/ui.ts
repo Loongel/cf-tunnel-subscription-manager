@@ -960,8 +960,9 @@ export function renderAdminUi(env: Env): string {
         bySource.set(item.sourceName, rows);
       }
       const html = Array.from(bySource.entries()).map(([sourceName, items]) => {
+        items.sort(compareDerivedNodes);
         const chips = items.map((item, index) => derivedChipHtml(item, selected.has(item.id), index + 1)).join('');
-        const meta = items.length + ' derived';
+        const meta = items.length + ' derived' + derivedEndpointSummary(items);
         return '<div class="chip-row"><div class="chip-row-title"><strong>' + esc(sourceName) + '</strong><span>' + esc(meta) + '</span></div><div class="chip-options">' + chips + '</div></div>';
       }).join('');
       byId('groupCandidateList').innerHTML = html || '<div class="muted small">No generated nodes. Add nodes and endpoints first.</div>';
@@ -973,7 +974,7 @@ export function renderAdminUi(env: Env): string {
       const mode = byId('groupCandidateMode').value;
       return state.generatedNodes.filter((item) => {
         const label = derivedFullLabel(item).toLowerCase();
-        const haystack = [item.sourceName, label, item.endpointValue, item.trafficLabel, item.tunnelHost, item.protocol].filter(Boolean).join(' ').toLowerCase();
+        const haystack = [item.sourceName, label, item.endpointLabel, item.endpointValue, item.trafficLabel, item.tunnelHost, item.protocol].filter(Boolean).join(' ').toLowerCase();
         if (mode === 'selected' && !selected.has(item.id)) return false;
         if (query && !haystack.includes(query)) return false;
         return true;
@@ -1296,17 +1297,36 @@ export function renderAdminUi(env: Env): string {
     function derivedShortLabel(item) {
       return derivedFullLabel(item);
     }
+    function compareDerivedNodes(a, b) {
+      const aEndpoint = derivedEndpointLabel(a).toLowerCase();
+      const bEndpoint = derivedEndpointLabel(b).toLowerCase();
+      const aTraffic = derivedTrafficLabel(a).toLowerCase();
+      const bTraffic = derivedTrafficLabel(b).toLowerCase();
+      return aTraffic.localeCompare(bTraffic, undefined, { sensitivity: 'base' })
+        || aEndpoint.localeCompare(bEndpoint, undefined, { sensitivity: 'base' })
+        || String(a.id || '').localeCompare(String(b.id || ''));
+    }
+    function derivedEndpointSummary(items) {
+      const labels = [];
+      for (const item of items) {
+        const label = derivedEndpointLabel(item);
+        if (!labels.includes(label)) labels.push(label);
+      }
+      return labels.length > 0 ? ' · ' + labels.join(', ') : '';
+    }
+    function derivedTrafficLabel(item) {
+      return item.tunnelHost || item.sniId ? (item.trafficLabel || item.tunnelHost || item.sniId || '') : 'Direct';
+    }
+    function derivedEndpointLabel(item) {
+      if (!(item.endpointId || item.endpointValue)) return 'Direct';
+      const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
+      return endpoint ? (endpoint.label || endpoint.value) : (item.endpointLabel || item.endpointValue || item.endpointId || 'Endpoint');
+    }
     function derivedParts(item) {
       const parts = [];
-      if (item.tunnelHost || item.sniId) {
-        const label = item.trafficLabel || item.tunnelHost || item.sniId;
-        parts.push({ label: label, value: label });
-      } else {
-        parts.push({ label: 'Direct', value: 'Direct' });
-      }
+      parts.push({ label: derivedTrafficLabel(item), value: derivedTrafficLabel(item) });
       if (item.endpointId || item.endpointValue) {
-        const endpoint = state.endpoints.find((row) => row.id === item.endpointId);
-        const label = endpoint ? (endpoint.label || endpoint.value) : (item.endpointLabel || item.endpointValue || item.endpointId);
+        const label = derivedEndpointLabel(item);
         parts.push({ label, value: label });
       }
       return parts;
