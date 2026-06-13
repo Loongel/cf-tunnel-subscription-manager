@@ -912,6 +912,7 @@ export function renderAdminUi(env: Env): string {
       return esc(row.value || '') + port;
     }
     function endpointPortLabel(row) {
+      if (row.discovery_mode === 'redirect') return 'Port: dynamic target';
       return row.port ? 'Port: ' + row.port : 'Port: keep original';
     }
     function endpointRoleLabel(row) {

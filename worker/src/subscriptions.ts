@@ -392,7 +392,7 @@ async function resolveEndpointValues(env: Env, endpoints: PreferredEndpointRow[]
         cache.set(key, pending);
       }
       const resolved = await pending;
-      return resolved ? { ...endpoint, value: resolved } : endpoint;
+      return resolved ? { ...endpoint, value: resolved, port: null } : { ...endpoint, port: null };
     }
     if (endpoint.type !== "domain" || endpoint.resolve_mode === "none") return endpoint;
     const target = parseEndpointTarget(endpoint.value);

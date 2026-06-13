@@ -1702,7 +1702,7 @@ async function createPreferredEndpointForValue(
         label = ?, port = ?, resolve_mode = ?, discovery_mode = ?, selection_mode = ?, enabled = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`,
       body.label === undefined ? existing.label : optionalString(body.label),
-      endpointPort(body.port ?? body.endpointPort, existing.port ?? "443"),
+      endpointPortForDiscovery(discoveryMode, body.port ?? body.endpointPort, existing.port ?? "443"),
       resolveMode,
       discoveryMode,
       selectionMode,
@@ -1725,7 +1725,7 @@ async function createPreferredEndpointForValue(
     type,
     value,
     optionalString(body.label),
-    endpointPort(body.port ?? body.endpointPort, "443"),
+    endpointPortForDiscovery(discoveryMode, body.port ?? body.endpointPort, "443"),
     resolveMode,
     discoveryMode,
     selectionMode,
@@ -1763,7 +1763,7 @@ async function updatePreferredEndpoint(env: Env, id: string, body: JsonRecord): 
     type,
     optionalString(body.value) || current.value,
     body.label === null ? null : optionalString(body.label) || current.label,
-    endpointPort(body.port ?? body.endpointPort, current.port ?? "443"),
+    endpointPortForDiscovery(discoveryMode, body.port ?? body.endpointPort, current.port ?? "443"),
     resolveMode,
     discoveryMode,
     selectionMode,
@@ -1808,6 +1808,15 @@ function endpointPort(value: unknown, fallback: string | null): string | null {
     throw new HttpError(400, "port must be blank or a number from 1 to 65535");
   }
   return port;
+}
+
+function endpointPortForDiscovery(
+  discoveryMode: NonNullable<PreferredEndpointRow["discovery_mode"]>,
+  value: unknown,
+  fallback: string | null
+): string | null {
+  if (discoveryMode === "redirect") return null;
+  return endpointPort(value, fallback);
 }
 
 function endpointSelectionMode(value: unknown, scope: string): PreferredEndpointRow["selection_mode"] {

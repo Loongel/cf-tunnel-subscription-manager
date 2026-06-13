@@ -300,6 +300,35 @@ describe("subscription generation", () => {
     expect(decodeURIComponent(parsed.hash.slice(1))).toBe("content | redirect-edge");
   });
 
+  it("uses the discovered port even when old redirect endpoint rows still have a stored port", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 307,
+      headers: { location: "https://real-edge.example.com:8443/path" }
+    })));
+
+    const generated = await listGeneratedNodes(env({
+      nodes: [node("node_1", "content")],
+      endpoints: [{
+        ...endpoint,
+        id: "endpoint_redirect",
+        type: "domain",
+        value: "discovery.example.com",
+        port: "443",
+        label: "redirect-edge",
+        discovery_mode: "redirect"
+      }]
+    }), {
+      format: "v2ray",
+      group: null,
+      includeDisabled: false,
+      endpointMode: "selected"
+    });
+
+    const parsed = new URL(generated.find((item) => item.endpointId === "endpoint_redirect")?.uri || "");
+    expect(parsed.hostname).toBe("real-edge.example.com");
+    expect(parsed.port).toBe("8443");
+  });
+
   it("sends the configured discovery access header when resolving discovery endpoints", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
       status: 307,
