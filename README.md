@@ -13,7 +13,7 @@ The project has two deployable parts:
 - Worker deployment URL: `https://cf-tunnel-control-plane.officesline.workers.dev`
 - Agent image: `ghcr.io/loongel/cf-tunnel-subscription-manager:v0.1.4`
 - Agent image digest: `sha256:ed88e369233ad841d4a17d1a3483e07f45161b1594593add7bab091ede06515b`
-- Latest verified Worker version: `18a7b937-ef30-4735-b45c-d81db526120c`
+- Latest verified Worker version: `5aa94abb-3974-4b05-9bcc-9a84839c2417`
 - Pinned `cloudflared` version in the agent image: `2026.6.0`
 
 Use a versioned agent image tag in production. `latest` is published for convenience, but production Swarm stacks should pin a release tag.

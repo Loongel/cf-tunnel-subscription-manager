@@ -494,6 +494,8 @@ export function renderAdminUi(env: Env): string {
     const state = { overview: null, tunnels: [], snis: [], nodes: [], endpoints: [], groups: [], generatedNodes: [], importSources: [], importCandidates: [], agents: [] };
     let editingNodeId = null;
     let editingEndpointId = null;
+    let editingEndpointOriginalRole = null;
+    let endpointNodeSelectionTouched = false;
     let editingGroupId = null;
     let editingSniId = null;
     let editingImportSourceId = null;
@@ -1122,6 +1124,8 @@ export function renderAdminUi(env: Env): string {
     }
     function resetEndpointForm() {
       editingEndpointId = null;
+      editingEndpointOriginalRole = null;
+      endpointNodeSelectionTouched = false;
       byId('createEndpoint').textContent = 'Add Endpoints';
       byId('endpointType').value = 'ip';
       byId('endpointRole').value = 'global';
@@ -1309,6 +1313,7 @@ export function renderAdminUi(env: Env): string {
         markBindingNodes(Array.from(selected));
       }
       if (t && t.dataset && t.dataset.endpointNodeId) {
+        endpointNodeSelectionTouched = true;
         const selected = new Set(selectedEndpointNodeIds());
         if (t.checked) selected.add(t.dataset.endpointNodeId);
         else selected.delete(t.dataset.endpointNodeId);
@@ -1500,9 +1505,11 @@ export function renderAdminUi(env: Env): string {
           const row = state.endpoints.find((item) => item.id === t.dataset.editEndpoint);
           if (row) {
             editingEndpointId = row.id;
+            editingEndpointOriginalRole = row.scope === 'node' && row.selection_mode === 'exclusive' ? 'exclusive' : (row.scope || 'global');
+            endpointNodeSelectionTouched = false;
             byId('createEndpoint').textContent = 'Save Endpoint';
             byId('endpointType').value = endpointTypeValue(row);
-            byId('endpointRole').value = row.scope === 'node' && row.selection_mode === 'exclusive' ? 'exclusive' : (row.scope || 'global');
+            byId('endpointRole').value = editingEndpointOriginalRole;
             byId('endpointResolveMode').value = row.resolve_mode || 'none';
             byId('endpointEnabled').value = row.enabled ? 'true' : 'false';
             byId('endpointValues').value = row.value || '';
@@ -1564,11 +1571,18 @@ export function renderAdminUi(env: Env): string {
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
     byId('endpointType').onchange = syncEndpointResolveModeControl;
     byId('endpointRole').onchange = () => {
+      endpointNodeSelectionTouched = true;
       markEndpointNodes([]);
       syncEndpointNodeControl();
     };
-    byId('selectAllEndpointNodes').onclick = () => markEndpointNodes(unique([...selectedEndpointNodeIds(), ...visibleEndpointNodes().map((node) => node.id)]));
-    byId('clearEndpointNodes').onclick = () => markEndpointNodes([]);
+    byId('selectAllEndpointNodes').onclick = () => {
+      endpointNodeSelectionTouched = true;
+      markEndpointNodes(unique([...selectedEndpointNodeIds(), ...visibleEndpointNodes().map((node) => node.id)]));
+    };
+    byId('clearEndpointNodes').onclick = () => {
+      endpointNodeSelectionTouched = true;
+      markEndpointNodes([]);
+    };
     byId('endpointNodeFilter').oninput = renderEndpointNodeOptions;
     byId('endpointNodeStatus').onchange = renderEndpointNodeOptions;
     byId('selectAllDerived').onclick = () => markDerivedCandidates(unique([...selectedDerivedIds(), ...filteredGeneratedNodes().map((node) => node.id)]));
@@ -1805,10 +1819,12 @@ export function renderAdminUi(env: Env): string {
           scope: role === 'exclusive' ? 'node' : role,
           selectionMode: role === 'exclusive' ? 'exclusive' : 'additive',
           enabled: byId('endpointEnabled').value === 'true',
-          sortOrder: Number(byId('endpointSort').value || 0),
-          proxyNodeIds: role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : [],
-          excludedProxyNodeIds: role === 'global' ? selectedValues(byId('endpointNodeIds')) : []
+          sortOrder: Number(byId('endpointSort').value || 0)
         };
+        if (!editingEndpointId || endpointNodeSelectionTouched || role !== editingEndpointOriginalRole) {
+          body.proxyNodeIds = role === 'exclusive' ? selectedValues(byId('endpointNodeIds')) : [];
+          body.excludedProxyNodeIds = role === 'global' ? selectedValues(byId('endpointNodeIds')) : [];
+        }
         if (editingEndpointId) body.value = byId('endpointValues').value;
         else body.values = byId('endpointValues').value;
         const data = await api(path, { method, body: JSON.stringify(body) });
