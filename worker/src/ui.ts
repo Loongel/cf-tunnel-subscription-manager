@@ -434,7 +434,7 @@ export function renderAdminUi(env: Env): string {
         </div>
       </div>
       <div class="section">
-        <table><thead><tr><th>Type</th><th>Value</th><th>Resolve</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
+        <table><thead><tr><th>Type</th><th>Value</th><th>Resolve</th><th>Role</th><th>Usage</th><th>Enabled</th><th>Actions</th></tr></thead><tbody id="endpointsBody"></tbody></table>
       </div>
     </section>
 
@@ -583,7 +583,7 @@ export function renderAdminUi(env: Env): string {
       agentsBody.innerHTML = lockedRow(6);
       tunnelsBody.innerHTML = lockedRow(6);
       nodesBody.innerHTML = lockedRow(6);
-      endpointsBody.innerHTML = lockedRow(6);
+      endpointsBody.innerHTML = lockedRow(7);
       groupsBody.innerHTML = lockedRow(4);
       subscriptionLinks.innerHTML = '<div class="muted small">Login required.</div>';
       previewOutput.textContent = '';
@@ -667,9 +667,9 @@ export function renderAdminUi(env: Env): string {
       state.endpoints = data.preferredEndpoints || [];
       renderEndpointOptions();
       renderEndpointNodeOptions();
-      endpointsBody.innerHTML = state.endpoints.map((row) =>
-        '<tr><td>' + esc(endpointTypeLabel(row)) + '</td><td class="mono">' + esc(row.value) + '<br><span class="muted">' + esc(row.label || '') + '</span></td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(endpointRoleLabel(row)) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
-      ).join('') || '<tr><td colspan="6" class="muted">No preferred endpoints.</td></tr>';
+      endpointsBody.innerHTML = sortedEndpointsForList().map((row) =>
+        '<tr><td>' + esc(endpointTypeLabel(row)) + '</td><td class="mono">' + endpointValueCell(row) + '</td><td>' + esc(endpointResolveLabel(row)) + '</td><td>' + esc(endpointRoleLabel(row)) + '</td><td>' + esc(endpointUsageLabel(row)) + '</td><td>' + statusPill(row.enabled ? 'enabled' : 'disabled') + '</td><td class="row-actions"><button data-edit-endpoint="' + esc(row.id) + '">Edit</button><button data-delete-endpoint="' + esc(row.id) + '" class="danger">Delete</button></td></tr>'
+      ).join('') || '<tr><td colspan="7" class="muted">No preferred endpoints.</td></tr>';
     }
     async function refreshGeneratedNodes() {
       const data = await api('/api/admin/subscriptions/generated-nodes?format=v2ray&endpointMode=selected');
@@ -886,10 +886,33 @@ export function renderAdminUi(env: Env): string {
       if (row.discovery_mode === 'redirect') return 'Discovery';
       return row.type || 'ip';
     }
+    function endpointListLabel(row) {
+      return (row.label || row.value || '').trim();
+    }
+    function sortedEndpointsForList() {
+      return [...state.endpoints].sort((a, b) => {
+        const order = Number(a.sort_order || 0) - Number(b.sort_order || 0);
+        if (order !== 0) return order;
+        return endpointListLabel(a).localeCompare(endpointListLabel(b), undefined, { sensitivity: 'base' })
+          || String(a.value || '').localeCompare(String(b.value || ''), undefined, { sensitivity: 'base' });
+      });
+    }
+    function endpointValueCell(row) {
+      const label = endpointListLabel(row);
+      if (row.label && row.label !== row.value) {
+        return '<strong>' + esc(label) + '</strong><br><span class="muted">' + esc(row.value || '') + '</span>';
+      }
+      return esc(row.value || '');
+    }
     function endpointRoleLabel(row) {
       if (row.scope === 'global') return 'Global Always On';
       if (row.selection_mode === 'exclusive') return 'Exclusive Binding Option';
       return 'Binding Option';
+    }
+    function endpointUsageLabel(row) {
+      if (row.scope === 'global') return String((row.excludedProxyNodeIds || []).length) + ' excluded';
+      if (row.selection_mode === 'exclusive') return String((row.proxyNodeIds || []).length) + ' exclusive nodes';
+      return String((row.selectedProxyNodeIds || []).length) + ' bound nodes';
     }
     function endpointRoleUsesNodes(role) {
       return role === 'exclusive' || role === 'global';

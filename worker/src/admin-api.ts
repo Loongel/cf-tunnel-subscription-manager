@@ -1526,13 +1526,21 @@ function selectedSniIdsFromBody(body: JsonRecord): string[] {
 }
 
 async function listPreferredEndpoints(env: Env): Promise<unknown[]> {
-  const endpoints = await all<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints ORDER BY sort_order, value");
+  const endpoints = await all<PreferredEndpointRow>(
+    env.DB,
+    "SELECT * FROM preferred_endpoints ORDER BY sort_order, lower(COALESCE(NULLIF(label, ''), value)), lower(value)"
+  );
   const scopes = await all<{ endpoint_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM preferred_endpoint_node_scopes");
   const exclusions = await all<{ endpoint_id: string; proxy_node_id: string }>(env.DB, "SELECT * FROM preferred_endpoint_node_exclusions");
+  const selections = await all<{ endpoint_id: string; proxy_node_id: string }>(
+    env.DB,
+    "SELECT endpoint_id, proxy_node_id FROM proxy_node_endpoint_selections WHERE enabled = 1"
+  );
   return endpoints.map((endpoint) => ({
     ...endpoint,
     proxyNodeIds: scopes.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id),
-    excludedProxyNodeIds: exclusions.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id)
+    excludedProxyNodeIds: exclusions.filter((scope) => scope.endpoint_id === endpoint.id).map((scope) => scope.proxy_node_id),
+    selectedProxyNodeIds: selections.filter((selection) => selection.endpoint_id === endpoint.id).map((selection) => selection.proxy_node_id)
   }));
 }
 
