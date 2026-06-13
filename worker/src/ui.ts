@@ -604,6 +604,11 @@ export function renderAdminUi(env: Env): string {
       saveTokenButton.classList.toggle('hidden', authed);
       authStatus.classList.toggle('hidden', !authed);
       clearTokenButton.classList.toggle('hidden', !authed);
+      document.querySelectorAll('#tabs button').forEach((button) => {
+        const isPublic = button.dataset.tab === 'dashboard';
+        button.classList.toggle('hidden', !authed && !isPublic);
+      });
+      if (!authed) activate('dashboard');
     }
     function statusPill(value) {
       const clean = String(value || 'unknown');
@@ -660,6 +665,7 @@ export function renderAdminUi(env: Env): string {
       importSourcesBody.innerHTML = lockedRow(5);
     }
     function activate(tab) {
+      if (tab !== 'dashboard' && !hasToken()) tab = 'dashboard';
       document.querySelectorAll('.view').forEach((el) => el.classList.toggle('hidden', el.id !== tab));
       document.querySelectorAll('#tabs button').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
     }
