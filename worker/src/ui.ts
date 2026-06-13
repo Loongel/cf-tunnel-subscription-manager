@@ -223,10 +223,13 @@ export function renderAdminUi(env: Env): string {
     .import-name-input { flex: 1 1 100%; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; outline: none; overflow-wrap: anywhere; }
     .import-name-input:focus { color: var(--selected); }
     .tls-controls { display: grid; gap: 6px; }
+    .endpoint-value-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 190px); gap: 10px; align-items: end; }
+    .endpoint-value-grid label { min-width: 0; }
     @media (max-width: 1020px) {
       header { align-items: stretch; flex-direction: column; }
       .tokenbar, .metrics, .formgrid, .split, .binding-grid, .import-row { grid-template-columns: 1fr; }
       .chip-row { grid-template-columns: 1fr; }
+      .endpoint-value-grid { grid-template-columns: 1fr; }
       .formgrid .wide { grid-column: span 1; }
       th { position: static; }
     }
@@ -415,8 +418,10 @@ export function renderAdminUi(env: Env): string {
           <label>Domain Resolve<select id="endpointResolveMode"><option value="none">Do Not Resolve</option><option value="ipv4">Resolve IPv4</option><option value="ipv6">Resolve IPv6</option></select></label>
           <label>Enabled<select id="endpointEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label>Sort Order<input id="endpointSort" type="number" value="0"></label>
-          <label>Port<input id="endpointPort" inputmode="numeric" placeholder="keep original" value="443"></label>
-          <label class="wide">Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com&#10;https://discovery.example.com"></textarea></label>
+          <div class="endpoint-value-grid full">
+            <label>Values<textarea id="endpointValues" placeholder="162.159.1.1, 104.16.1.1&#10;cdn.example.com&#10;https://discovery.example.com"></textarea></label>
+            <label id="endpointPortLabel">Port<input id="endpointPort" inputmode="numeric" placeholder="留空使用原始端口" value="443"></label>
+          </div>
           <label class="wide">Label<input id="endpointLabel" placeholder="optional"></label>
           <div id="endpointNodePicker" class="subpanel full hidden">
             <div class="toolbar">
@@ -922,10 +927,15 @@ export function renderAdminUi(env: Env): string {
     function endpointRoleUsesNodes(role) {
       return role === 'exclusive' || role === 'global';
     }
-    function syncEndpointResolveModeControl() {
+    function syncEndpointTypeControls() {
       const isDomain = byId('endpointType').value === 'domain';
+      const isRedirect = byId('endpointType').value === 'redirect';
       byId('endpointResolveMode').disabled = !isDomain;
       if (!isDomain) byId('endpointResolveMode').value = 'none';
+      byId('endpointPortLabel').classList.toggle('hidden', isRedirect);
+      byId('endpointPort').disabled = isRedirect;
+      if (isRedirect) byId('endpointPort').value = '';
+      else if (!byId('endpointPort').value && !editingEndpointId) byId('endpointPort').value = '443';
     }
     function syncEndpointNodeControl() {
       const role = byId('endpointRole').value;
@@ -1169,7 +1179,7 @@ export function renderAdminUi(env: Env): string {
       byId('endpointNodeFilter').value = '';
       byId('endpointNodeStatus').value = 'all';
       markEndpointNodes([]);
-      syncEndpointResolveModeControl();
+      syncEndpointTypeControls();
       syncEndpointNodeControl();
     }
     function resetSniForm() {
@@ -1558,7 +1568,7 @@ export function renderAdminUi(env: Env): string {
             byId('endpointSort').value = String(row.sort_order || 0);
             renderEndpointNodeOptions();
             markEndpointNodes(linkedNodeIds);
-            syncEndpointResolveModeControl();
+            syncEndpointTypeControls();
             syncEndpointNodeControl();
           }
         }
@@ -1610,7 +1620,7 @@ export function renderAdminUi(env: Env): string {
     byId('bindingNodeStatus').onchange = renderBindingNodeList;
     byId('bindingTrafficFilter').oninput = renderTunnelOptions;
     byId('bindingEndpointFilter').oninput = renderEndpointOptions;
-    byId('endpointType').onchange = syncEndpointResolveModeControl;
+    byId('endpointType').onchange = syncEndpointTypeControls;
     byId('endpointRole').onchange = () => {
       endpointNodeSelectionTouched = true;
       markEndpointNodes([]);
@@ -1963,7 +1973,7 @@ export function renderAdminUi(env: Env): string {
       }
     }
 
-    syncEndpointResolveModeControl();
+    syncEndpointTypeControls();
     syncEndpointNodeControl();
     refreshAll(false);
   </script>

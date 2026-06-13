@@ -1685,16 +1685,17 @@ async function createPreferredEndpointForValue(
   const resolveMode = endpointResolveMode(body.resolveMode, inputType);
   const scope = optionalString(body.scope) || "global";
   if (scope !== "global" && scope !== "node") throw new HttpError(400, "scope must be global or node");
+  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   const timestamp = nowIso();
   const existing = await first<PreferredEndpointRow>(
     env.DB,
-    "SELECT * FROM preferred_endpoints WHERE type = ? AND value = ? AND scope = ?",
+    "SELECT * FROM preferred_endpoints WHERE type = ? AND value = ? AND scope = ? AND selection_mode = ?",
     type,
     value,
-    scope
+    scope,
+    selectionMode
   );
   if (existing) {
-    const selectionMode = endpointSelectionModeForUpdate(body.selectionMode, scope, existing);
     await run(
       env.DB,
       `UPDATE preferred_endpoints SET
@@ -1715,7 +1716,6 @@ async function createPreferredEndpointForValue(
     return { row: await first<PreferredEndpointRow>(env.DB, "SELECT * FROM preferred_endpoints WHERE id = ?", existing.id) };
   }
 
-  const selectionMode = endpointSelectionMode(body.selectionMode, scope);
   await run(
     env.DB,
     `INSERT INTO preferred_endpoints
