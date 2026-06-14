@@ -17,15 +17,15 @@ Never commit real Cloudflare tokens, tunnel tokens, or subscription tokens. Use 
 
 ## Build Location
 
-The user requires build and compile work to run on `ssh hd01`; do not perform heavy local compilation. In this workspace, non-interactive SSH works when `SSH_AUTH_SOCK` points at a signing agent such as `/tmp/ssh-hPdP3ZA6Jo6o/agent.14261` instead of the gpg-agent socket.
+The user requires build and compile work to run on `ssh hd01`; do not perform heavy local compilation. Use the current default SSH agent environment; do not hardcode a stale `SSH_AUTH_SOCK` path.
 
 ## Verification Commands
 
 Run on `ssh hd01` once available:
 
 ```bash
-SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/diagnose-hd01-ssh.sh
-SSH_AUTH_SOCK=/tmp/ssh-hPdP3ZA6Jo6o/agent.14261 ./scripts/remote-build-hd01.sh
+./scripts/diagnose-hd01-ssh.sh
+./scripts/remote-build-hd01.sh
 ./scripts/deploy-worker.sh
 ```
 
