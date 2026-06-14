@@ -528,6 +528,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   const seenImportKeys = new Set<string>();
   const variants: ImportVariant[] = [];
   const newIdsByImportKey = new Map<string, string>();
+  const newNodeIds = new Set<string>();
   let skipped = 0;
   let created = 0;
   let updated = 0;
@@ -535,8 +536,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
   let deletedRows: DeletedImportedNodeRow[] = [];
 
   if (body.replaceExistingForRemark === true && remark) {
-    deletedRows = await deleteImportedNodesByRemarks(env, replacementRemarks(body, remark));
-    deletedOld = deletedRows.length;
+    deletedRows = await snapshotImportedNodesByRemarks(env, replacementRemarks(body, remark));
   }
 
   const deletedStateByImportKey = importStateByDeletedImportKey(deletedRows);
@@ -591,6 +591,7 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
         || deletedStateByName.get(variant.name);
       const restoredEndpointIds = restoredState?.selectedEndpointIds || [];
       newIdsByImportKey.set(variant.identity.importKey, stableId);
+      newNodeIds.add(stableId);
       const payload = {
         name: restoredState?.name || variant.name,
         remark: restoredState?.remark ?? (remark || item.sourceName),
@@ -608,6 +609,10 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
         id: stableId
       };
       const result = await upsertImportedProxyNode(env, payload);
+      if (restoredState) {
+        await restoreExclusiveEndpointScopesForNode(env, stableId, restoredState.exclusiveEndpointScopeIds);
+        await restoreGlobalEndpointExclusionsForNode(env, stableId, restoredState.globalEndpointExclusionIds);
+      }
       if (restoredState) {
         await upsertProxyNodeMutableState(env, variant.identity.importKey, {
           name: restoredState.name,
@@ -628,6 +633,9 @@ async function importProxyNodes(env: Env, body: JsonRecord): Promise<{
     await migrateGroupDerivedNodeIds(env, deletedRows, newIdsByImportKey);
     await migrateExclusiveEndpointScopes(env, deletedRows, newIdsByImportKey);
     await migrateGlobalEndpointExclusions(env, deletedRows, newIdsByImportKey);
+  }
+  if (body.replaceExistingForRemark === true && remark) {
+    deletedOld = await deleteStaleImportedNodesByRemarks(env, replacementRemarks(body, remark), newNodeIds);
   }
 
   return { imported: created, updated, skipped, deletedOld, proxyNodes: imported, errors };
@@ -679,7 +687,7 @@ function replacementRemarks(body: JsonRecord, remark: string): string[] {
   return Array.from(new Set([remark, ...parseEndpointValues(body.replaceExistingRemarks)]));
 }
 
-async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promise<DeletedImportedNodeRow[]> {
+async function snapshotImportedNodesByRemarks(env: Env, remarks: string[]): Promise<DeletedImportedNodeRow[]> {
   if (remarks.length === 0) return [];
   const placeholders = remarks.map(() => "?").join(", ");
   const rows = await all<{ id: string; name: string; remark: string | null; enabled: number; import_key: string | null }>(
@@ -701,14 +709,6 @@ async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promis
   const globalEndpointExclusionIdsByNodeId = await globalEndpointExclusionIds(env, rows.map((row) => row.id));
   const trafficKeysByNodeId = await selectedTrafficKeysByNodeId(env, rows.map((row) => row.id));
   const sniIdsByNodeId = await selectedSniIdsByNodeId(env, rows.map((row) => row.id));
-  await run(
-    env.DB,
-    `DELETE FROM proxy_nodes
-     WHERE remark IN (${placeholders})
-        OR import_source_name IN (${placeholders})`,
-    ...remarks,
-    ...remarks
-  );
   return rows.map((row) => ({
     ...row,
     selectedEndpointIds: selectedEndpointIdsByNodeId.get(row.id) || [],
@@ -717,6 +717,35 @@ async function deleteImportedNodesByRemarks(env: Env, remarks: string[]): Promis
     selectedTrafficKeys: trafficKeysByNodeId.get(row.id) || [],
     selectedSniIds: sniIdsByNodeId.get(row.id) || []
   }));
+}
+
+async function deleteStaleImportedNodesByRemarks(env: Env, remarks: string[], keepIds: Set<string>): Promise<number> {
+  if (remarks.length === 0) return 0;
+  const placeholders = remarks.map(() => "?").join(", ");
+  const keep = Array.from(keepIds);
+  const keepClause = keep.length > 0 ? `AND id NOT IN (${keep.map(() => "?").join(", ")})` : "";
+  const rows = await all<{ id: string }>(
+    env.DB,
+    `SELECT id FROM proxy_nodes
+     WHERE (remark IN (${placeholders})
+        OR import_source_name IN (${placeholders}))
+       ${keepClause}`,
+    ...remarks,
+    ...remarks,
+    ...keep
+  );
+  if (rows.length === 0) return 0;
+  await run(
+    env.DB,
+    `DELETE FROM proxy_nodes
+     WHERE (remark IN (${placeholders})
+        OR import_source_name IN (${placeholders}))
+       ${keepClause}`,
+    ...remarks,
+    ...remarks,
+    ...keep
+  );
+  return rows.length;
 }
 
 async function exclusiveEndpointScopeIds(env: Env, nodeIds: string[]): Promise<Map<string, string[]>> {
@@ -1015,6 +1044,27 @@ async function migrateExclusiveEndpointScopes(
   }
 }
 
+async function restoreExclusiveEndpointScopesForNode(
+  env: Env,
+  nodeId: string,
+  endpointIds: string[]
+): Promise<void> {
+  for (const endpointId of endpointIds) {
+    await run(
+      env.DB,
+      "INSERT OR IGNORE INTO preferred_endpoint_node_scopes (endpoint_id, proxy_node_id) VALUES (?, ?)",
+      endpointId,
+      nodeId
+    );
+    await run(
+      env.DB,
+      "INSERT OR REPLACE INTO proxy_node_endpoint_selections (proxy_node_id, endpoint_id, enabled) VALUES (?, ?, 1)",
+      nodeId,
+      endpointId
+    );
+  }
+}
+
 async function migrateGlobalEndpointExclusions(
   env: Env,
   deletedRows: DeletedImportedNodeRow[],
@@ -1032,6 +1082,21 @@ async function migrateGlobalEndpointExclusions(
         newId
       );
     }
+  }
+}
+
+async function restoreGlobalEndpointExclusionsForNode(
+  env: Env,
+  nodeId: string,
+  endpointIds: string[]
+): Promise<void> {
+  for (const endpointId of endpointIds) {
+    await run(
+      env.DB,
+      "INSERT OR IGNORE INTO preferred_endpoint_node_exclusions (endpoint_id, proxy_node_id) VALUES (?, ?)",
+      endpointId,
+      nodeId
+    );
   }
 }
 
@@ -1552,8 +1617,13 @@ function importSourceBody(source: ImportSourceRow): JsonRecord {
 
 async function upsertImportedProxyNode(env: Env, body: JsonRecord): Promise<{ row: ProxyNodeRow | null; created: boolean }> {
   const importKey = requiredString(body.importKey, "importKey");
+  const desiredId = optionalString(body.id);
+  if (desiredId) {
+    const existingById = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE id = ?", desiredId);
+    if (existingById) return { row: await updateProxyNode(env, existingById.id, body), created: false };
+  }
   const existing = await first<ProxyNodeRow>(env.DB, "SELECT * FROM proxy_nodes WHERE import_key = ? ORDER BY updated_at DESC LIMIT 1", importKey);
-  if (existing) {
+  if (existing && (!desiredId || existing.id === desiredId)) {
     return { row: await updateProxyNode(env, existing.id, body), created: false };
   }
   return { row: await createProxyNode(env, body), created: true };

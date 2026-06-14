@@ -39,6 +39,36 @@ class MockStatement {
   }
 
   async run(): Promise<void> {
+    if (this.query.startsWith("UPDATE proxy_nodes SET")) {
+      const [
+        name,
+        remark,
+        sourceType,
+        rawConfig,
+        importKey,
+        importSourceName,
+        rawConfigHash,
+        protocol,
+        enabled,
+        updatedAt,
+        id
+      ] = this.params;
+      const row = this.tables.nodes.find((item) => item.id === id);
+      if (row) {
+        row.name = String(name);
+        row.remark = typeof remark === "string" ? remark : null;
+        row.source_type = String(sourceType);
+        row.raw_config = String(rawConfig);
+        row.import_key = typeof importKey === "string" ? importKey : null;
+        row.import_source_name = typeof importSourceName === "string" ? importSourceName : null;
+        row.raw_config_hash = typeof rawConfigHash === "string" ? rawConfigHash : null;
+        row.protocol = String(protocol);
+        row.enabled = Number(enabled);
+        row.updated_at = String(updatedAt);
+      }
+      return;
+    }
+
     if (this.query.startsWith("INSERT INTO proxy_nodes")) {
       const [
         id,
@@ -68,6 +98,25 @@ class MockStatement {
         created_at: String(createdAt),
         updated_at: String(updatedAt)
       });
+      return;
+    }
+
+    if (this.query.includes("DELETE FROM proxy_nodes")
+      && this.query.includes("id NOT IN")) {
+      const remarkCount = countPlaceholdersInRemarkIn(this.query);
+      const remarks = new Set(this.params.slice(0, remarkCount).map(String));
+      const keepIds = new Set(this.params.slice(remarkCount * 2).map(String));
+      const deletedIds = new Set(this.tables.nodes
+        .filter((row) =>
+          ((row.remark && remarks.has(row.remark)) || (row.import_source_name && remarks.has(row.import_source_name)))
+          && !keepIds.has(row.id))
+        .map((row) => row.id));
+      this.tables.nodes = this.tables.nodes.filter((row) => !deletedIds.has(row.id));
+      this.tables.endpointSelections = this.tables.endpointSelections.filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.endpointScopes = (this.tables.endpointScopes || []).filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.endpointExclusions = (this.tables.endpointExclusions || []).filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.trafficBindings = (this.tables.trafficBindings || []).filter((row) => !deletedIds.has(row.proxy_node_id));
+      this.tables.sniSelections = (this.tables.sniSelections || []).filter((row) => !deletedIds.has(row.proxy_node_id));
       return;
     }
 
@@ -210,6 +259,17 @@ class MockStatement {
     if (this.query.includes("SELECT * FROM proxy_nodes WHERE id = ?")) {
       return this.tables.nodes.filter((row) => row.id === this.params[0]);
     }
+    if (this.query.includes("SELECT id FROM proxy_nodes")
+      && this.query.includes("id NOT IN")) {
+      const remarkCount = countPlaceholdersInRemarkIn(this.query);
+      const remarks = new Set(this.params.slice(0, remarkCount).map(String));
+      const keepIds = new Set(this.params.slice(remarkCount * 2).map(String));
+      return this.tables.nodes
+        .filter((row) =>
+          ((row.remark && remarks.has(row.remark)) || (row.import_source_name && remarks.has(row.import_source_name)))
+          && !keepIds.has(row.id))
+        .map((row) => ({ id: row.id }));
+    }
     if (this.query.includes("SELECT * FROM proxy_nodes WHERE name = ?")) {
       return this.tables.nodes.filter((row) => row.name === this.params[0]);
     }
@@ -226,6 +286,11 @@ class MockStatement {
     }
     return [];
   }
+}
+
+function countPlaceholdersInRemarkIn(query: string): number {
+  const match = /remark IN \(([^)]*)\)/.exec(query);
+  return match ? (match[1].match(/\?/g) || []).length : 0;
 }
 
 function env(tables: TableMap): Env {
@@ -448,6 +513,70 @@ describe("admin import refresh", () => {
     ]);
     expect(tables.sniSelections).toEqual([
       { proxy_node_id: tables.nodes[0].id, sni_id: "sni_1", enabled: 1 }
+    ]);
+  });
+
+  it("updates stable imported nodes in place without dropping existing links", async () => {
+    const rawConfig = "vless://00000000-0000-4000-8000-000000000000@new.example:443?security=tls&type=ws#content";
+    const stableId = "node_f3f8fd1fd6fd4826d08206f032525107";
+    const oldNode = node(stableId, "content", "managed-sub", rawConfig, "0eeaed8594ef0d34470debacf478e7c3f72f4140");
+    oldNode.import_key = "import:v1:managed-sub:0eeaed8594ef0d34470debacf478e7c3f72f4140";
+    oldNode.import_source_name = "managed-sub";
+    const tables: TableMap = {
+      nodes: [oldNode],
+      endpoints: [
+        {
+          id: "endpoint_exclusive",
+          type: "domain",
+          value: "edge.example.com",
+          label: "exclusive-edge",
+          resolve_mode: "none",
+          selection_mode: "exclusive",
+          enabled: 1,
+          scope: "node",
+          sort_order: 0,
+          created_at: "",
+          updated_at: ""
+        },
+        {
+          id: "endpoint_global",
+          type: "domain",
+          value: "cdn.example.com",
+          label: "global-cdn",
+          resolve_mode: "none",
+          selection_mode: "additive",
+          enabled: 1,
+          scope: "global",
+          sort_order: 0,
+          created_at: "",
+          updated_at: ""
+        }
+      ],
+      endpointSelections: [{ proxy_node_id: stableId, endpoint_id: "endpoint_exclusive", enabled: 1 }],
+      endpointScopes: [{ proxy_node_id: stableId, endpoint_id: "endpoint_exclusive" }],
+      endpointExclusions: [{ proxy_node_id: stableId, endpoint_id: "endpoint_global" }],
+      trafficBindings: [{ proxy_node_id: stableId, traffic_key: "swarm:wawo01|target:http://s-ui:80", enabled: 1 }]
+    };
+
+    const result = await __adminApiTestHooks.importProxyNodes(env(tables), {
+      remark: "managed-sub",
+      replaceExistingForRemark: true,
+      candidates: [{
+        id: "candidate_1",
+        sourceName: "managed-sub",
+        sourceType: "v2ray_uri",
+        name: "content",
+        rawConfig,
+        protocol: "vless"
+      }]
+    });
+
+    expect(result).toMatchObject({ imported: 0, updated: 1, deletedOld: 0, skipped: 0 });
+    expect(tables.nodes).toHaveLength(1);
+    expect(tables.endpointScopes).toEqual([{ proxy_node_id: stableId, endpoint_id: "endpoint_exclusive" }]);
+    expect(tables.endpointExclusions).toEqual([{ proxy_node_id: stableId, endpoint_id: "endpoint_global" }]);
+    expect(tables.trafficBindings).toEqual([
+      { proxy_node_id: stableId, traffic_key: "swarm:wawo01|target:http://s-ui:80", enabled: 1 }
     ]);
   });
 
